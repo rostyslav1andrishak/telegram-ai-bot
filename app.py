@@ -25,8 +25,14 @@ def ask_ai(message):
     print("STATUS:", response.status_code)
     print("RESPONSE:", response.text)
 
-    return response.json()["choices"][0]["message"]["content"]
+    data = response.json()
 
+print("FULL RESPONSE:", data)
+
+if "choices" not in data:
+    return f"Помилка AI: {data}"
+
+return data["choices"][0]["message"]["content"]
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
