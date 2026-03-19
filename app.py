@@ -16,17 +16,25 @@ def ask_ai(message):
         json={
             "model": "mistralai/mistral-7b-instruct",
             "messages": [
-                {"role": "system", "content": "Ти мій AI помічник. Допомагаєш з продажами, авто і пишеш чеською."},
+                {"role": "system", "content": "Ти мій AI помічник"},
                 {"role": "user", "content": message}
             ]
         }
     )
+
+    print("STATUS:", response.status_code)
+    print("RESPONSE:", response.text)
+
     return response.json()["choices"][0]["message"]["content"]
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-    message = data.get("message", {})
+
+message = data.get("message") or data.get("edited_message")
+
+if not message:
+    return "ok"
     
     chat_id = message.get("chat", {}).get("id")
     text = message.get("text")
