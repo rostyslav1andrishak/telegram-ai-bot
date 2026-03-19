@@ -2,7 +2,7 @@ import requests
 from flask import Flask, request
 
 TOKEN = "8658895357:AAEAMx-QoDfk2Cl3q4NlveBM36o1LoJzvnA"
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = "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"
 
 app = Flask(__name__)
 
