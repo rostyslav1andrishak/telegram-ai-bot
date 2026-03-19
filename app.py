@@ -25,7 +25,7 @@ def ask_ai(message):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
+    data = request.get_json()
     message = data.get("message", {})
     
     chat_id = message.get("chat", {}).get("id")
