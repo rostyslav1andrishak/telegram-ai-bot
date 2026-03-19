@@ -23,7 +23,7 @@ def ask_ai(message):
     )
     return response.json()["choices"][0]["message"]["content"]
 
-@app.route("/", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
     message = data.get("message", {})
