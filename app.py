@@ -2,6 +2,7 @@ import requests
 import sqlite3
 from flask import Flask, request
 import os
+import json
 
 TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -35,7 +36,7 @@ conn.commit()
 def send_message(chat_id, text):
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={"chat_id": chat_id, "text": text}
+        json={"chat_id": chat_id, "text": text[:4000]}
     )
 
 # --- HISTORY ---
@@ -60,7 +61,21 @@ def get_memory(user_id):
     for c, k, v in rows:
         text += f"[{c}] {k}: {v}\n"
 
-    return text
+    return text if text else "немає даних"
+
+# --- ФІНАНСИ ---
+def get_finance_summary(user_id):
+    cursor.execute("SELECT value FROM facts WHERE user_id=? AND category='фінанси'", (user_id,))
+    rows = cursor.fetchall()
+
+    total = 0
+    for r in rows:
+        try:
+            total += int(''.join(filter(str.isdigit, r[0])))
+        except:
+            pass
+
+    return f"💰 Ти витратив приблизно: {total}"
 
 # --- SMART MEMORY ---
 def analyze_and_save(user_id, text):
@@ -81,14 +96,14 @@ def analyze_and_save(user_id, text):
 Виділи тільки ВАЖЛИВІ факти про людину.
 
 Що зберігати:
+- гроші (витрати, доходи)
 - цілі
-- гроші
+- плани
 - звички
 - проблеми
-- плани
 
-Формат JSON:
-{category: {key: value}}
+Формат:
+{"категорія": {"ключ": "значення"}}
 
 Якщо нічого → {}
 """},
@@ -102,12 +117,12 @@ def analyze_and_save(user_id, text):
         if "choices" not in data:
             return
 
-        import json
         content = data["choices"][0]["message"]["content"]
         facts = json.loads(content)
 
         for category, values in facts.items():
             for k, v in values.items():
+
                 cursor.execute("""
                 DELETE FROM facts 
                 WHERE user_id=? AND category=? AND key=?
@@ -124,7 +139,10 @@ def analyze_and_save(user_id, text):
 
 # --- IMAGE ---
 def analyze_image(file_id):
-    file = requests.get(f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}").json()
+    file = requests.get(
+        f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
+    ).json()
+
     file_path = file["result"]["file_path"]
     file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
 
@@ -136,7 +154,7 @@ def analyze_image(file_id):
             "input": [{
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": "Опиши фото максимально корисно"},
+                    {"type": "input_text", "text": "Що на цьому фото і чим це корисно?"},
                     {"type": "input_image", "image_url": file_url}
                 ]
             }]
@@ -146,53 +164,74 @@ def analyze_image(file_id):
     data = response.json()
     return data["output"][0]["content"][0]["text"]
 
-# --- VOICE (через AI напряму) ---
+# --- VOICE ---
 def handle_voice(file_id):
-    return "🎤 Голос отримав (підключимо наступним кроком)"
+    return "🎤 Голос отримав (скоро буде розпізнавання)"
 
 # --- AI ---
 def ask_ai(user_id, message):
+
+    if "скільки я витратив" in message.lower():
+        return get_finance_summary(user_id)
 
     history = get_history(user_id)
     memory = get_memory(user_id)
 
     messages = [
-        {"role": "system", "content": f"""
+        {
+            "role": "system",
+            "content": f"""
 Ти персональний AI асистент.
 
-Ти:
-- знаєш користувача
-- пам’ятаєш його життя
-- допомагаєш приймати рішення
-- аналізуєш його ситуацію
+ТИ МАЄШ ПАМʼЯТЬ.
+ТИ ВИКОРИСТОВУЄШ ІСТОРІЮ.
 
-Ось памʼять:
+НІКОЛИ не кажи:
+- "я не памʼятаю"
+- "я не зберігаю"
+
+ТИ ПАМʼЯТАЄШ ВСЕ.
+
+ПАМʼЯТЬ:
 {memory}
 
-Будь розумним, коротким і корисним.
-"""}
-    ] + history + [
-        {"role": "user", "content": message}
+Будь:
+- розумним
+- коротким
+- корисним
+"""
+        }
     ]
 
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "gpt-4o-mini",
-            "messages": messages
-        }
-    )
+    messages += history
 
-    data = response.json()
+    messages.append({
+        "role": "user",
+        "content": message
+    })
 
-    if "choices" not in data:
-        return f"Помилка AI: {data}"
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": messages
+            }
+        )
 
-    return data["choices"][0]["message"]["content"]
+        data = response.json()
+
+        if "choices" not in data:
+            return f"Помилка AI: {data}"
+
+        return data["choices"][0]["message"]["content"]
+
+    except Exception as e:
+        return f"Помилка: {str(e)}"
 
 # --- WEBHOOK ---
 @app.route("/webhook", methods=["POST"])
