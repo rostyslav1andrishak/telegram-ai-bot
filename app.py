@@ -13,27 +13,31 @@ app = Flask(__name__)
 conn = sqlite3.connect("memory.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS facts (
-    user_id INTEGER,
-    category TEXT,
-    key TEXT,
-    value TEXT
-)
-""")
+def init_db():
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS facts (
+        user_id INTEGER,
+        category TEXT,
+        key TEXT,
+        value TEXT
+    )
+    """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS messages (
+        user_id INTEGER,
+        role TEXT,
+        text TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    conn.commit()
 
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS messages (
-    user_id INTEGER,
-    role TEXT,
-    text TEXT
-)
-""")
-
-conn.commit()
+init_db()
 
 # --- TELEGRAM SENDERS ---
 def send_message(chat_id, text):
+    if not text:
+        return
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         json={"chat_id": chat_id, "text": text[:4000]}
@@ -59,13 +63,16 @@ def send_document(chat_id, url, caption=""):
 
 # --- HISTORY ---
 def save_message(user_id, role, text):
-    cursor.execute("INSERT INTO messages VALUES (?, ?, ?)", (user_id, role, text))
+    cursor.execute(
+        "INSERT INTO messages (user_id, role, text) VALUES (?, ?, ?)",
+        (user_id, role, text)
+    )
     conn.commit()
 
 def get_history(user_id, limit=10):
     cursor.execute("""
         SELECT role, text FROM messages
-        WHERE user_id=? ORDER BY rowid DESC LIMIT ?
+        WHERE user_id=? ORDER BY timestamp DESC LIMIT ?
     """, (user_id, limit))
     rows = cursor.fetchall()
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
@@ -75,18 +82,14 @@ def get_memory(user_id):
     cursor.execute("SELECT category, key, value FROM facts WHERE user_id=?", (user_id,))
     rows = cursor.fetchall()
 
-    text = ""
-    for c, k, v in rows:
-        text += f"[{c}] {k}: {v}\n"
+    return "\n".join([f"[{c}] {k}: {v}" for c, k, v in rows]) if rows else "немає даних"
 
-    return text if text else "немає даних"
-
-# --- SMART MEMORY ---
+# --- SMART MEMORY (FIXED) ---
 def analyze_and_save(user_id, text):
-    try:
-        if len(text) < 8:
-            return
+    if len(text) < 8:
+        return
 
+    try:
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers={
@@ -96,14 +99,24 @@ def analyze_and_save(user_id, text):
             json={
                 "model": "gpt-4o-mini",
                 "messages": [
-                    {"role": "system", "content": """
-Виділи тільки важливі факти.
+                    {
+                        "role": "system",
+                        "content": """
+Виділи тільки важливі факти про людину.
+
+Що зберігати:
+- гроші
+- цілі
+- плани
+- звички
+- проблеми
 
 Формат JSON:
 {"категорія": {"ключ": "значення"}}
 
 Якщо нічого → {}
-"""},
+"""
+                    },
                     {"role": "user", "content": text}
                 ]
             }
@@ -128,15 +141,16 @@ def analyze_and_save(user_id, text):
                 """, (user_id, category, k))
 
                 cursor.execute("""
-                INSERT INTO facts VALUES (?, ?, ?, ?)
+                INSERT INTO facts (user_id, category, key, value)
+                VALUES (?, ?, ?, ?)
                 """, (user_id, category, k, v))
 
         conn.commit()
 
-    except:
-        pass
+    except Exception as e:
+        print("ERROR:", e)
 
-# --- IMAGE ANALYSIS ---
+# --- IMAGE ---
 def analyze_image(file_id):
     file = requests.get(
         f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
@@ -145,27 +159,55 @@ def analyze_image(file_id):
     file_path = file["result"]["file_path"]
     file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
 
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-        json={
-            "model": "gpt-4o-mini",
-            "input": [{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "Опиши це фото"},
-                    {"type": "input_image", "image_url": file_url}
-                ]
-            }]
-        }
-    )
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            json={
+                "model": "gpt-4o-mini",
+                "input": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Опиши це фото"},
+                        {"type": "input_image", "image_url": file_url}
+                    ]
+                }]
+            }
+        )
 
-    data = response.json()
-    return data["output"][0]["content"][0]["text"]
+        data = response.json()
+        return data["output"][0]["content"][0]["text"]
+
+    except:
+        return "Не зміг обробити фото"
 
 # --- VOICE ---
 def handle_voice(file_id):
-    return "🎤 Голос отримав (додамо скоро)"
+    return "🎤 Голос отримав (додамо пізніше)"
+
+# --- COMMANDS ---
+def handle_commands(chat_id, text):
+    t = text.lower()
+
+    if "графік" in t:
+        send_photo(chat_id,
+            "https://www.coinglass.com/pro/funding_rate",
+            "📊 Funding rate")
+        return True
+
+    if "відео" in t:
+        send_video(chat_id,
+            "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4",
+            "🎬 Відео")
+        return True
+
+    if "документ" in t:
+        send_document(chat_id,
+            "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+            "📄 Документ")
+        return True
+
+    return False
 
 # --- AI ---
 def ask_ai(user_id, message):
@@ -176,61 +218,42 @@ def ask_ai(user_id, message):
     messages = [{
         "role": "system",
         "content": f"""
-Ти AI асистент.
+Ти персональний AI асистент.
 
 ТИ МАЄШ ПАМʼЯТЬ:
 {memory}
 
-Будь коротким, розумним і практичним.
+НЕ кажи що не памʼятаєш.
+
+Будь коротким і корисним.
 """
     }]
 
     messages += history
     messages.append({"role": "user", "content": message})
 
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "gpt-4o-mini",
-            "messages": messages
-        }
-    )
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": messages
+            }
+        )
 
-    data = response.json()
+        data = response.json()
 
-    if "choices" not in data:
-        return f"Помилка: {data}"
+        if "choices" not in data:
+            return f"Помилка: {data}"
 
-    return data["choices"][0]["message"]["content"]
+        return data["choices"][0]["message"]["content"]
 
-# --- COMMANDS ---
-def handle_commands(chat_id, text):
-
-    t = text.lower()
-
-    if "графік" in t:
-        send_photo(chat_id,
-            "https://www.coinglass.com/pro/funding_rate",
-            "📊 Графік funding rate")
-        return True
-
-    if "відео" in t:
-        send_video(chat_id,
-            "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4",
-            "🎬 Приклад відео")
-        return True
-
-    if "документ" in t:
-        send_document(chat_id,
-            "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-            "📄 Приклад файлу")
-        return True
-
-    return False
+    except Exception as e:
+        return f"Помилка: {str(e)}"
 
 # --- WEBHOOK ---
 @app.route("/webhook", methods=["POST"])
