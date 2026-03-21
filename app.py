@@ -14,7 +14,7 @@ def ask_ai(message):
             "Content-Type": "application/json"
         },
         json={
-            "model": "mistralai/mistral-7b-instruct",
+            "model": "openrouter/auto",
             "messages": [
                 {"role": "system", "content": "Ти AI помічник"},
                 {"role": "user", "content": message}
