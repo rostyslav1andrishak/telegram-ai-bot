@@ -32,11 +32,29 @@ CREATE TABLE IF NOT EXISTS messages (
 
 conn.commit()
 
-# --- TELEGRAM ---
+# --- TELEGRAM SENDERS ---
 def send_message(chat_id, text):
     requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         json={"chat_id": chat_id, "text": text[:4000]}
+    )
+
+def send_photo(chat_id, url, caption=""):
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+        json={"chat_id": chat_id, "photo": url, "caption": caption}
+    )
+
+def send_video(chat_id, url, caption=""):
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendVideo",
+        json={"chat_id": chat_id, "video": url, "caption": caption}
+    )
+
+def send_document(chat_id, url, caption=""):
+    requests.post(
+        f"https://api.telegram.org/bot{TOKEN}/sendDocument",
+        json={"chat_id": chat_id, "document": url, "caption": caption}
     )
 
 # --- HISTORY ---
@@ -63,20 +81,6 @@ def get_memory(user_id):
 
     return text if text else "немає даних"
 
-# --- ФІНАНСИ ---
-def get_finance_summary(user_id):
-    cursor.execute("SELECT value FROM facts WHERE user_id=? AND category='фінанси'", (user_id,))
-    rows = cursor.fetchall()
-
-    total = 0
-    for r in rows:
-        try:
-            total += int(''.join(filter(str.isdigit, r[0])))
-        except:
-            pass
-
-    return f"💰 Ти витратив приблизно: {total}"
-
 # --- SMART MEMORY ---
 def analyze_and_save(user_id, text):
     try:
@@ -93,16 +97,9 @@ def analyze_and_save(user_id, text):
                 "model": "gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": """
-Виділи тільки ВАЖЛИВІ факти про людину.
+Виділи тільки важливі факти.
 
-Що зберігати:
-- гроші (витрати, доходи)
-- цілі
-- плани
-- звички
-- проблеми
-
-Формат:
+Формат JSON:
 {"категорія": {"ключ": "значення"}}
 
 Якщо нічого → {}
@@ -113,19 +110,21 @@ def analyze_and_save(user_id, text):
         )
 
         data = response.json()
-
         if "choices" not in data:
             return
 
         content = data["choices"][0]["message"]["content"]
-        facts = json.loads(content)
+
+        try:
+            facts = json.loads(content)
+        except:
+            print("JSON ERROR:", content)
+            return
 
         for category, values in facts.items():
             for k, v in values.items():
-
                 cursor.execute("""
-                DELETE FROM facts 
-                WHERE user_id=? AND category=? AND key=?
+                DELETE FROM facts WHERE user_id=? AND category=? AND key=?
                 """, (user_id, category, k))
 
                 cursor.execute("""
@@ -137,7 +136,7 @@ def analyze_and_save(user_id, text):
     except:
         pass
 
-# --- IMAGE ---
+# --- IMAGE ANALYSIS ---
 def analyze_image(file_id):
     file = requests.get(
         f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
@@ -154,7 +153,7 @@ def analyze_image(file_id):
             "input": [{
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": "Що на цьому фото і чим це корисно?"},
+                    {"type": "input_text", "text": "Опиши це фото"},
                     {"type": "input_image", "image_url": file_url}
                 ]
             }]
@@ -166,79 +165,79 @@ def analyze_image(file_id):
 
 # --- VOICE ---
 def handle_voice(file_id):
-    return "🎤 Голос отримав (скоро буде розпізнавання)"
+    return "🎤 Голос отримав (додамо скоро)"
 
 # --- AI ---
 def ask_ai(user_id, message):
 
-    if "скільки я витратив" in message.lower():
-        return get_finance_summary(user_id)
-
     history = get_history(user_id)
     memory = get_memory(user_id)
 
-    messages = [
-        {
-            "role": "system",
-            "content": f"""
-Ти персональний AI асистент.
+    messages = [{
+        "role": "system",
+        "content": f"""
+Ти AI асистент.
 
-ТИ МАЄШ ПАМʼЯТЬ.
-ТИ ВИКОРИСТОВУЄШ ІСТОРІЮ.
-
-НІКОЛИ не кажи:
-- "я не памʼятаю"
-- "я не зберігаю"
-
-ТИ ПАМʼЯТАЄШ ВСЕ.
-
-ПАМʼЯТЬ:
+ТИ МАЄШ ПАМʼЯТЬ:
 {memory}
 
-Будь:
-- розумним
-- коротким
-- корисним
+Будь коротким, розумним і практичним.
 """
-        }
-    ]
+    }]
 
     messages += history
+    messages.append({"role": "user", "content": message})
 
-    messages.append({
-        "role": "user",
-        "content": message
-    })
+    response = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "gpt-4o-mini",
+            "messages": messages
+        }
+    )
 
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "gpt-4o-mini",
-                "messages": messages
-            }
-        )
+    data = response.json()
 
-        data = response.json()
+    if "choices" not in data:
+        return f"Помилка: {data}"
 
-        if "choices" not in data:
-            return f"Помилка AI: {data}"
+    return data["choices"][0]["message"]["content"]
 
-        return data["choices"][0]["message"]["content"]
+# --- COMMANDS ---
+def handle_commands(chat_id, text):
 
-    except Exception as e:
-        return f"Помилка: {str(e)}"
+    t = text.lower()
+
+    if "графік" in t:
+        send_photo(chat_id,
+            "https://www.coinglass.com/pro/funding_rate",
+            "📊 Графік funding rate")
+        return True
+
+    if "відео" in t:
+        send_video(chat_id,
+            "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4",
+            "🎬 Приклад відео")
+        return True
+
+    if "документ" in t:
+        send_document(chat_id,
+            "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+            "📄 Приклад файлу")
+        return True
+
+    return False
 
 # --- WEBHOOK ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-
     message = data.get("message")
+
     if not message:
         return "ok"
 
@@ -246,6 +245,9 @@ def webhook():
 
     if "text" in message:
         text = message["text"]
+
+        if handle_commands(chat_id, text):
+            return "ok"
 
     elif "photo" in message:
         file_id = message["photo"][-1]["file_id"]
@@ -256,7 +258,7 @@ def webhook():
         text = handle_voice(file_id)
 
     else:
-        text = "Не підтримую цей формат"
+        text = "Не підтримую"
 
     save_message(chat_id, "user", text)
     analyze_and_save(chat_id, text)
