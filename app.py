@@ -61,15 +61,8 @@ def get_memory(user_id):
     rows = cursor.fetchall()
 
     text = ""
-
     for c, k, v in rows:
         text += f"[{c}] {k}: {v}\n"
-
-    return text
-
-    text = "Дані про користувача:\n"
-    for k, v in rows:
-        text += f"- {k}: {v}\n"
 
     return text
 
@@ -113,9 +106,47 @@ def analyze_and_save(user_id, text):
     except:
         pass
 # --- AI ---
-def ask_ai(message):
-    ...
-    return ...
+def ask_ai(user_id, message):
+    history = get_history(user_id)
+    memory = get_memory(user_id)
+
+    messages = [
+        {"role": "system", "content": f"""
+Ти персональний AI користувача.
+
+Ти:
+- пам’ятаєш його дані
+- аналізуєш їх
+- допомагаєш приймати рішення
+- порівнюєш минуле і теперішнє
+
+Ось дані:
+{memory}
+
+Будь розумним і проактивним.
+"""}
+    ] + history + [
+        {"role": "user", "content": message}
+    ]
+
+    response = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "openrouter/auto",
+            "messages": messages
+        }
+    )
+
+    data = response.json()
+
+    if "choices" not in data:
+        return f"Помилка AI: {data}"
+
+    return data["choices"][0]["message"]["content"]
 
 # 👇 ВСТАВ ТУТ (на тому ж рівні!)
 def get_finance_summary(user_id):
@@ -131,8 +162,7 @@ def get_finance_summary(user_id):
 
     return f"Ти витратив приблизно: {total}"
 
-    history = get_history(user_id)
-    memory = get_memory(user_id)
+    
 
     messages = [
         {"role": "system", "content": f"""
