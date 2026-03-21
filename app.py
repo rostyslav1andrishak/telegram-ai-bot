@@ -3,7 +3,7 @@ import sqlite3
 from flask import Flask, request
 
 TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
-OPENROUTER_API_KEY = "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"
+OPENAI_API_KEY = "OPENAI_API_KEY"
 
 app = Flask(__name__)
 
@@ -61,35 +61,45 @@ def get_memory(user_id):
 
     return text
 
+# --- ФІНАНСИ ---
+def get_finance_summary(user_id):
+    cursor.execute("SELECT value FROM facts WHERE user_id=? AND category='фінанси'", (user_id,))
+    rows = cursor.fetchall()
+
+    total = 0
+    for r in rows:
+        try:
+            total += int(''.join(filter(str.isdigit, r[0])))
+        except:
+            pass
+
+    return f"💰 Загальні витрати: {total}"
+
 # --- SMART MEMORY ---
 def analyze_and_save(user_id, text):
     try:
         response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
+            "https://api.openai.com/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "Content-Type": "application/json"
             },
             json={
-                "model": "openai/gpt-4o-mini",
+                "model": "gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": """
-Виділи тільки ВАЖЛИВІ факти про користувача.
-
-НЕ зберігай:
-- випадкові фрази
-- дрібниці
-
-Зберігай:
-- цілі
-- гроші
-- звички
-- плани
+Виділи важливі факти про користувача.
 
 Формат JSON:
 {category: {key: value}}
 
-Якщо нічого важливого → {}
+Категорії:
+- фінанси
+- плани
+- особисте
+- робота
+
+Якщо нічого → {}
 """},
                     {"role": "user", "content": text}
                 ]
@@ -108,7 +118,6 @@ def analyze_and_save(user_id, text):
         for category, values in facts.items():
             for k, v in values.items():
 
-                # 🔥 ОНОВЛЕННЯ (як у людини)
                 cursor.execute("""
                 DELETE FROM facts 
                 WHERE user_id=? AND category=? AND key=?
@@ -125,6 +134,10 @@ def analyze_and_save(user_id, text):
 
 # --- AI ---
 def ask_ai(user_id, message):
+
+    if "скільки я витратив" in message.lower():
+        return get_finance_summary(user_id)
+
     history = get_history(user_id)
     memory = get_memory(user_id)
 
@@ -133,15 +146,11 @@ def ask_ai(user_id, message):
 Ти персональний AI користувача.
 
 Ти:
-- пам’ятаєш його історію
-- аналізуєш поведінку
-- даєш поради
-- порівнюєш минуле і теперішнє
+- пам’ятаєш історію
+- аналізуєш
+- допомагаєш
 
-Якщо бачиш закономірності — скажи про них.
-Якщо можеш допомогти — запропонуй.
-
-Ось дані:
+Ось памʼять:
 {memory}
 """}
     ] + history + [
@@ -149,13 +158,13 @@ def ask_ai(user_id, message):
     ]
 
     response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
+        "https://api.openai.com/v1/chat/completions",
         headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json"
         },
         json={
-            "model": "openai/gpt-4o-mini",
+            "model": "gpt-4o-mini",
             "messages": messages
         }
     )
