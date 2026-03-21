@@ -3,7 +3,7 @@ import sqlite3
 from flask import Flask, request
 
 TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
-OPENROUTER_API_KEY = "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"
+OPENROUTER_API_KEY = "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"
 
 app = Flask(__name__)
 
