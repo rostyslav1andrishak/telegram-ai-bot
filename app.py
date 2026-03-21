@@ -1,9 +1,9 @@
 import requests
 import sqlite3
 from flask import Flask, request
+import os
 
 TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
-import os
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
@@ -62,23 +62,12 @@ def get_memory(user_id):
 
     return text
 
-# --- ФІНАНСИ ---
-def get_finance_summary(user_id):
-    cursor.execute("SELECT value FROM facts WHERE user_id=? AND category='фінанси'", (user_id,))
-    rows = cursor.fetchall()
-
-    total = 0
-    for r in rows:
-        try:
-            total += int(''.join(filter(str.isdigit, r[0])))
-        except:
-            pass
-
-    return f"💰 Загальні витрати: {total}"
-
 # --- SMART MEMORY ---
 def analyze_and_save(user_id, text):
     try:
+        if len(text) < 8:
+            return
+
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers={
@@ -89,16 +78,17 @@ def analyze_and_save(user_id, text):
                 "model": "gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": """
-Виділи важливі факти про користувача.
+Виділи тільки ВАЖЛИВІ факти про людину.
+
+Що зберігати:
+- цілі
+- гроші
+- звички
+- проблеми
+- плани
 
 Формат JSON:
 {category: {key: value}}
-
-Категорії:
-- фінанси
-- плани
-- особисте
-- робота
 
 Якщо нічого → {}
 """},
@@ -118,7 +108,6 @@ def analyze_and_save(user_id, text):
 
         for category, values in facts.items():
             for k, v in values.items():
-
                 cursor.execute("""
                 DELETE FROM facts 
                 WHERE user_id=? AND category=? AND key=?
@@ -133,26 +122,54 @@ def analyze_and_save(user_id, text):
     except:
         pass
 
+# --- IMAGE ---
+def analyze_image(file_id):
+    file = requests.get(f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}").json()
+    file_path = file["result"]["file_path"]
+    file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+
+    response = requests.post(
+        "https://api.openai.com/v1/responses",
+        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+        json={
+            "model": "gpt-4o-mini",
+            "input": [{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Опиши фото максимально корисно"},
+                    {"type": "input_image", "image_url": file_url}
+                ]
+            }]
+        }
+    )
+
+    data = response.json()
+    return data["output"][0]["content"][0]["text"]
+
+# --- VOICE (через AI напряму) ---
+def handle_voice(file_id):
+    return "🎤 Голос отримав (підключимо наступним кроком)"
+
 # --- AI ---
 def ask_ai(user_id, message):
-
-    if "скільки я витратив" in message.lower():
-        return get_finance_summary(user_id)
 
     history = get_history(user_id)
     memory = get_memory(user_id)
 
     messages = [
         {"role": "system", "content": f"""
-Ти персональний AI користувача.
+Ти персональний AI асистент.
 
 Ти:
-- пам’ятаєш історію
-- аналізуєш
-- допомагаєш
+- знаєш користувача
+- пам’ятаєш його життя
+- допомагаєш приймати рішення
+- аналізуєш його ситуацію
 
 Ось памʼять:
 {memory}
+
+Будь розумним, коротким і корисним.
 """}
     ] + history + [
         {"role": "user", "content": message}
@@ -182,12 +199,25 @@ def ask_ai(user_id, message):
 def webhook():
     data = request.get_json()
 
-    message = data.get("message") or data.get("edited_message")
+    message = data.get("message")
     if not message:
         return "ok"
 
     chat_id = message["chat"]["id"]
-    text = message.get("text", "")
+
+    if "text" in message:
+        text = message["text"]
+
+    elif "photo" in message:
+        file_id = message["photo"][-1]["file_id"]
+        text = analyze_image(file_id)
+
+    elif "voice" in message:
+        file_id = message["voice"]["file_id"]
+        text = handle_voice(file_id)
+
+    else:
+        text = "Не підтримую цей формат"
 
     save_message(chat_id, "user", text)
     analyze_and_save(chat_id, text)
