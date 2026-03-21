@@ -2,7 +2,7 @@ import requests
 import sqlite3
 from flask import Flask, request
 
-TOKEN = "8658895357:AAEAMx-QoDfk2Cl3q4NlveBM36o1LoJzvnA"
+TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
 OPENROUTER_API_KEY = "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"
 
 app = Flask(__name__)
