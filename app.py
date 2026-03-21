@@ -3,7 +3,8 @@ import sqlite3
 from flask import Flask, request
 
 TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
-OPENAI_API_KEY = "OPENAI_API_KEY"
+import os
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 
