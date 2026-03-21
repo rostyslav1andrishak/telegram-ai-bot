@@ -81,10 +81,9 @@ def get_history(user_id, limit=10):
 def get_memory(user_id):
     cursor.execute("SELECT category, key, value FROM facts WHERE user_id=?", (user_id,))
     rows = cursor.fetchall()
-
     return "\n".join([f"[{c}] {k}: {v}" for c, k, v in rows]) if rows else "немає даних"
 
-# --- SMART MEMORY (FIXED) ---
+# --- SMART MEMORY ---
 def analyze_and_save(user_id, text):
     if len(text) < 8:
         return
@@ -102,14 +101,7 @@ def analyze_and_save(user_id, text):
                     {
                         "role": "system",
                         "content": """
-Виділи тільки важливі факти про людину.
-
-Що зберігати:
-- гроші
-- цілі
-- плани
-- звички
-- проблеми
+Виділи тільки важливі факти.
 
 Формат JSON:
 {"категорія": {"ключ": "значення"}}
@@ -181,9 +173,34 @@ def analyze_image(file_id):
     except:
         return "Не зміг обробити фото"
 
-# --- VOICE ---
+# --- 🔥 VOICE (РЕАЛЬНИЙ) ---
 def handle_voice(file_id):
-    return "🎤 Голос отримав (додамо пізніше)"
+    try:
+        file = requests.get(
+            f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={file_id}"
+        ).json()
+
+        file_path = file["result"]["file_path"]
+        file_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+
+        audio = requests.get(file_url).content
+
+        response = requests.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}"
+            },
+            files={
+                "file": ("voice.ogg", audio),
+                "model": (None, "gpt-4o-mini-transcribe")
+            }
+        )
+
+        data = response.json()
+        return data.get("text", "Не вдалося розпізнати")
+
+    except Exception as e:
+        return f"Помилка голосу: {str(e)}"
 
 # --- COMMANDS ---
 def handle_commands(chat_id, text):
