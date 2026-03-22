@@ -2,6 +2,8 @@ import requests
 import sqlite3
 from flask import Flask, request
 from datetime import datetime, timedelta
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -29,7 +31,7 @@ CREATE TABLE IF NOT EXISTS services (
 
 conn.commit()
 
-# --- ГРАФІК ---
+# --- SETTINGS ---
 WORK_DAYS = [0,1,2,3,4,5]
 
 DAY_SLOTS = {
@@ -41,20 +43,17 @@ DAY_SLOTS = {
     5: ["10:00","12:00","14:00"],
 }
 
-# --- ADMIN ---
-admins = {}
-
-def is_admin(token, user_id):
-    return admins.get(token) == user_id
-
-def set_admin(token, user_id):
-    admins[token] = user_id
-
 # --- TELEGRAM ---
 def send_message(token, chat_id, text):
     requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
         json={"chat_id": chat_id, "text": text}
+    )
+
+def send_photo(token, chat_id, url):
+    requests.post(
+        f"https://api.telegram.org/bot{token}/sendPhoto",
+        json={"chat_id": chat_id, "photo": url}
     )
 
 def send_keyboard(token, chat_id, text, buttons):
@@ -76,6 +75,7 @@ def show_menu(token, chat_id):
         ["📅 Записатися"],
         ["💅 Прайс"],
         ["📖 Мій запис"],
+        ["🖼 Роботи"],
         ["❌ Скасувати запис"]
     ])
 
@@ -100,7 +100,7 @@ def show_services(token, chat_id):
 
     send_keyboard(token, chat_id, "💅 Обери послугу:", buttons)
 
-# --- ДАТИ ---
+# --- DATE ---
 def show_dates(token, chat_id):
     today = datetime.now()
     buttons = []
@@ -133,6 +133,12 @@ def save_booking(token,user_id,service,date,time):
     )
     conn.commit()
 
+def delete_booking(token,user_id):
+    cursor.execute("""
+    DELETE FROM bookings WHERE bot_token=? AND user_id=?
+    """,(token,user_id))
+    conn.commit()
+
 def get_user_booking(token,user_id):
     cursor.execute("""
     SELECT service,date,time FROM bookings
@@ -140,13 +146,7 @@ def get_user_booking(token,user_id):
     """,(token,user_id))
     return cursor.fetchone()
 
-def delete_booking(token,user_id):
-    cursor.execute("""
-    DELETE FROM bookings WHERE bot_token=? AND user_id=?
-    """,(token,user_id))
-    conn.commit()
-
-# --- ЧАС ---
+# --- TIME ---
 def show_times(token, chat_id, date):
 
     try:
@@ -155,7 +155,6 @@ def show_times(token, chat_id, date):
         weekday = datetime.now().weekday()
 
     slots = DAY_SLOTS.get(weekday, [])
-
     free = [t for t in slots if not is_taken(token, date, t)]
 
     if not free:
@@ -219,30 +218,40 @@ def handle_booking(token,chat_id,text):
 
     return False
 
-# --- ADMIN ---
-def handle_admin(token,chat_id,text):
+# --- AUTO REPLIES ---
+def auto_reply(token,chat_id,text):
 
-    if "/admin" in text:
-        set_admin(token,chat_id)
-        send_message(token,chat_id,"🔐 Ти адмін")
+    t=text.lower()
+
+    if "скільки" in t or "ціна" in t:
+        send_message(token,chat_id,"💅 Напиши 'Прайс' і я покажу всі ціни 😉")
         return True
 
-    if not is_admin(token,chat_id):
-        return False
-
-    if "додай послугу" in text:
-        try:
-            parts = text.split()
-            price = parts[-1]
-            name = " ".join(parts[2:-1])
-
-            add_service(token,name,price)
-            send_message(token,chat_id,f"✅ {name} — {price}")
-            return True
-        except:
-            pass
+    if "запис" in t:
+        send_message(token,chat_id,"Натисни '📅 Записатися'")
+        return True
 
     return False
+
+# --- PORTFOLIO ---
+def show_portfolio(token, chat_id):
+    send_photo(token, chat_id, "https://i.imgur.com/1.jpg")
+    send_photo(token, chat_id, "https://i.imgur.com/2.jpg")
+
+# --- REMINDER (🔥 ТОП) ---
+def reminder_loop():
+    while True:
+        now = datetime.now().strftime("%d.%m %H:%M")
+
+        cursor.execute("SELECT bot_token,user_id,service,date,time FROM bookings")
+        for b in cursor.fetchall():
+            if f"{b[3]} {b[4]}" == now:
+                send_message(b[0], b[1],
+                f"🔔 Нагадування!\nСьогодні у тебе {b[2]} о {b[4]}")
+
+        time.sleep(60)
+
+threading.Thread(target=reminder_loop, daemon=True).start()
 
 # --- COMMANDS ---
 def handle_commands(token,chat_id,text):
@@ -253,10 +262,6 @@ def handle_commands(token,chat_id,text):
 
     if text == "💅 Прайс":
         services=get_services(token)
-
-        if not services:
-            send_message(token,chat_id,"Прайс пустий")
-            return True
 
         msg="💅 Прайс:\n\n"
         for s in services:
@@ -281,6 +286,10 @@ def handle_commands(token,chat_id,text):
 """)
         return True
 
+    if text == "🖼 Роботи":
+        show_portfolio(token,chat_id)
+        return True
+
     if text == "❌ Скасувати запис":
         delete_booking(token,chat_id)
         send_message(token,chat_id,"❌ Запис скасовано")
@@ -302,13 +311,13 @@ def webhook(token):
     chat_id=message["chat"]["id"]
     text=message.get("text","")
 
-    if handle_admin(token,chat_id,text):
-        return "ok"
-
     if handle_booking(token,chat_id,text):
         return "ok"
 
     if handle_commands(token,chat_id,text):
+        return "ok"
+
+    if auto_reply(token,chat_id,text):
         return "ok"
 
     send_message(token,chat_id,"Напиши /start")
