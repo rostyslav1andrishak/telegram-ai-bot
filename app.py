@@ -2,8 +2,6 @@ import requests
 import sqlite3
 from flask import Flask, request
 from datetime import datetime, timedelta
-import threading
-import time
 
 app = Flask(__name__)
 
@@ -31,6 +29,15 @@ CREATE TABLE IF NOT EXISTS services (
 
 conn.commit()
 
+# --- 🔐 ADMIN ---
+admins = {}
+
+def is_admin(token, user_id):
+    return admins.get(token) == user_id
+
+def set_admin(token, user_id):
+    admins[token] = user_id
+
 # --- SETTINGS ---
 WORK_DAYS = [0,1,2,3,4,5]
 
@@ -44,12 +51,6 @@ DAY_SLOTS = {
 }
 
 # --- TELEGRAM ---
-def send_message(token, chat_id, text):
-    requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text}
-    )
-
 def send_keyboard(token, chat_id, text, buttons):
     requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
@@ -65,11 +66,12 @@ def send_keyboard(token, chat_id, text, buttons):
 
 # --- MENU ---
 def show_menu(token, chat_id):
-    send_keyboard(token, chat_id, "💅 Обери дію:", [
+    send_keyboard(token, chat_id,
+    "💖 Вітаю в салоні!\nОбери, що потрібно:",
+    [
         ["📅 Записатися"],
-        ["💅 Прайс"],
+        ["💅 Ціни"],
         ["📖 Мій запис"],
-        ["🖼 Роботи"],
         ["❌ Скасувати запис"]
     ])
 
@@ -82,11 +84,11 @@ def show_services(token, chat_id):
     services = get_services(token)
 
     if not services:
-        send_keyboard(token, chat_id, "❌ Немає послуг", [["🔙 Назад"]])
+        send_keyboard(token, chat_id, "❌ Немає послуг", [["🏠 Меню"]])
         return
 
     buttons = [[s[0]] for s in services]
-    buttons.append(["🔙 Назад"])
+    buttons.append(["🏠 Меню"])
 
     send_keyboard(token, chat_id, "💅 Обери послугу:", buttons)
 
@@ -103,7 +105,7 @@ def show_dates(token, chat_id):
 
         buttons.append([d.strftime("%d.%m")])
 
-    buttons.append(["🔙 Назад"])
+    buttons.append(["🏠 Меню"])
 
     send_keyboard(token, chat_id, "📅 Обери дату:", buttons)
 
@@ -148,13 +150,44 @@ def show_times(token, chat_id, date):
     free = [t for t in slots if not is_taken(token, date, t)]
 
     if not free:
-        send_keyboard(token, chat_id, "❌ Немає місць", [["🔙 Назад"]])
+        send_keyboard(token, chat_id, "❌ Немає місць", [["🏠 Меню"]])
         return
 
     buttons = [[t] for t in free]
-    buttons.append(["🔙 Назад"])
+    buttons.append(["🏠 Меню"])
 
     send_keyboard(token, chat_id, "🕒 Обери час:", buttons)
+
+# --- 🔥 ADMIN HANDLER ---
+def handle_admin(token, chat_id, text):
+
+    if text == "/admin":
+        set_admin(token, chat_id)
+        send_keyboard(token, chat_id, "🔐 Ти адмін", [["🏠 Меню"]])
+        return True
+
+    if not is_admin(token, chat_id):
+        return False
+
+    if text.lower().startswith("додай послугу"):
+        try:
+            parts = text.split()
+            price = parts[-1]
+            name = " ".join(parts[2:-1])
+
+            cursor.execute(
+                "INSERT INTO services VALUES (?, ?, ?)",
+                (token, name, price)
+            )
+            conn.commit()
+
+            send_keyboard(token, chat_id, f"✅ {name} — {price}", [["🏠 Меню"]])
+            return True
+        except:
+            send_keyboard(token, chat_id, "❌ Помилка", [["🏠 Меню"]])
+            return True
+
+    return False
 
 # --- BOOKING FLOW ---
 def handle_booking(token,chat_id,text):
@@ -162,7 +195,7 @@ def handle_booking(token,chat_id,text):
     key=f"{token}_{chat_id}"
     state=user_states.get(key)
 
-    if text == "🔙 Назад":
+    if text == "🏠 Меню":
         user_states.pop(key, None)
         show_menu(token, chat_id)
         return True
@@ -190,7 +223,7 @@ def handle_booking(token,chat_id,text):
     elif state["step"]=="time":
 
         if is_taken(token,state["date"],text):
-            send_keyboard(token,chat_id,"❌ Зайнято", [["🔙 Назад"]])
+            send_keyboard(token,chat_id,"❌ Зайнято",[["🏠 Меню"]])
             return True
 
         save_booking(token,chat_id,state["service"],state["date"],text)
@@ -199,7 +232,8 @@ def handle_booking(token,chat_id,text):
 
 💅 {state["service"]}
 📅 {state["date"]}
-🕒 {text}""",[["🏠 Меню"]])
+🕒 {text}
+""",[["🏠 Меню"]])
 
         user_states.pop(key,None)
         return True
@@ -213,16 +247,16 @@ def handle_commands(token,chat_id,text):
         show_menu(token,chat_id)
         return True
 
-    if text == "💅 Прайс":
+    if text == "💅 Ціни":
         services=get_services(token)
 
         if not services:
             send_keyboard(token,chat_id,"Прайс пустий",[["🏠 Меню"]])
             return True
 
-        msg="💅 Прайс:\n\n"
+        msg="💅 Наші послуги:\n\n"
         for name,price in services:
-            msg+=f"• {name} — {price} Kč\n"
+            msg+=f"✨ {name}\n💰 {price} Kč\n\n"
 
         send_keyboard(token,chat_id,msg,[["🏠 Меню"]])
         return True
@@ -262,6 +296,10 @@ def webhook(token):
 
     chat_id=message["chat"]["id"]
     text=message.get("text","")
+
+    # 🔥 ВАЖЛИВО: адмін перший
+    if handle_admin(token,chat_id,text):
+        return "ok"
 
     if handle_booking(token,chat_id,text):
         return "ok"
