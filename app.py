@@ -2,6 +2,7 @@ import requests
 import sqlite3
 from flask import Flask, request
 from datetime import datetime, timedelta
+import re
 
 app = Flask(__name__)
 
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS services (
 
 conn.commit()
 
-# --- 🔐 ADMIN ---
+# --- ADMIN ---
 admins = {}
 
 def is_admin(token, user_id):
@@ -76,9 +77,23 @@ def show_menu(token, chat_id):
     ])
 
 # --- SERVICES ---
+def add_service(token, name, price):
+    cursor.execute("INSERT INTO services VALUES (?, ?, ?)", (token, name, price))
+    conn.commit()
+
 def get_services(token):
     cursor.execute("SELECT name, price FROM services WHERE bot_token=?", (token,))
     return cursor.fetchall()
+
+def parse_service(text):
+    match = re.search(r"(\d+)", text)
+    if not match:
+        return None, None
+
+    price = match.group(1)
+    name = text.replace(price, "").replace("—", "").replace("-", "").replace("=", "").strip()
+
+    return name, price
 
 def show_services(token, chat_id):
     services = get_services(token)
@@ -158,34 +173,38 @@ def show_times(token, chat_id, date):
 
     send_keyboard(token, chat_id, "🕒 Обери час:", buttons)
 
-# --- 🔥 ADMIN HANDLER ---
-def handle_admin(token, chat_id, text):
+# --- ADMIN HANDLER ---
+def handle_admin(token,chat_id,text):
 
     if text == "/admin":
-        set_admin(token, chat_id)
-        send_keyboard(token, chat_id, "🔐 Ти адмін", [["🏠 Меню"]])
+        set_admin(token,chat_id)
+        send_keyboard(token,chat_id,"🔐 Ти адмін",[["🏠 Меню"]])
         return True
 
-    if not is_admin(token, chat_id):
+    if not is_admin(token,chat_id):
         return False
 
-    if text.lower().startswith("додай послугу"):
-        try:
-            parts = text.split()
-            price = parts[-1]
-            name = " ".join(parts[2:-1])
+    # 🔥 очистка всіх послуг
+    if text.lower() == "очисти послуги":
+        cursor.execute("DELETE FROM services WHERE bot_token=?", (token,))
+        conn.commit()
+        send_keyboard(token,chat_id,"🧹 Всі послуги видалено",[["🏠 Меню"]])
+        return True
 
-            cursor.execute(
-                "INSERT INTO services VALUES (?, ?, ?)",
-                (token, name, price)
-            )
-            conn.commit()
+    # 🔥 розумне додавання
+    lines = text.split("\n")
+    added = []
 
-            send_keyboard(token, chat_id, f"✅ {name} — {price}", [["🏠 Меню"]])
-            return True
-        except:
-            send_keyboard(token, chat_id, "❌ Помилка", [["🏠 Меню"]])
-            return True
+    for line in lines:
+        name, price = parse_service(line)
+
+        if name and price:
+            add_service(token,name,price)
+            added.append(f"✅ {name} — {price}")
+
+    if added:
+        send_keyboard(token,chat_id,"\n".join(added),[["🏠 Меню"]])
+        return True
 
     return False
 
@@ -297,7 +316,6 @@ def webhook(token):
     chat_id=message["chat"]["id"]
     text=message.get("text","")
 
-    # 🔥 ВАЖЛИВО: адмін перший
     if handle_admin(token,chat_id,text):
         return "ok"
 
