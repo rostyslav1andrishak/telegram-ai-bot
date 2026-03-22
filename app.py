@@ -50,12 +50,6 @@ def send_message(token, chat_id, text):
         json={"chat_id": chat_id, "text": text}
     )
 
-def send_photo(token, chat_id, url):
-    requests.post(
-        f"https://api.telegram.org/bot{token}/sendPhoto",
-        json={"chat_id": chat_id, "photo": url}
-    )
-
 def send_keyboard(token, chat_id, text, buttons):
     requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
@@ -80,10 +74,6 @@ def show_menu(token, chat_id):
     ])
 
 # --- SERVICES ---
-def add_service(token, name, price):
-    cursor.execute("INSERT INTO services VALUES (?, ?, ?)", (token, name, price))
-    conn.commit()
-
 def get_services(token):
     cursor.execute("SELECT name, price FROM services WHERE bot_token=?", (token,))
     return cursor.fetchall()
@@ -92,7 +82,7 @@ def show_services(token, chat_id):
     services = get_services(token)
 
     if not services:
-        send_message(token, chat_id, "❌ Немає послуг")
+        send_keyboard(token, chat_id, "❌ Немає послуг", [["🔙 Назад"]])
         return
 
     buttons = [[s[0]] for s in services]
@@ -158,8 +148,7 @@ def show_times(token, chat_id, date):
     free = [t for t in slots if not is_taken(token, date, t)]
 
     if not free:
-        send_message(token, chat_id, "❌ Немає місць")
-        show_menu(token, chat_id)
+        send_keyboard(token, chat_id, "❌ Немає місць", [["🔙 Назад"]])
         return
 
     buttons = [[t] for t in free]
@@ -201,99 +190,62 @@ def handle_booking(token,chat_id,text):
     elif state["step"]=="time":
 
         if is_taken(token,state["date"],text):
-            send_message(token,chat_id,"❌ Зайнято")
+            send_keyboard(token,chat_id,"❌ Зайнято", [["🔙 Назад"]])
             return True
 
         save_booking(token,chat_id,state["service"],state["date"],text)
 
-        send_message(token,chat_id,f"""✅ Запис підтверджено
+        send_keyboard(token,chat_id,f"""✅ Запис підтверджено
 
 💅 {state["service"]}
 📅 {state["date"]}
-🕒 {text}""")
+🕒 {text}""",[["🏠 Меню"]])
 
         user_states.pop(key,None)
-        show_menu(token,chat_id)
         return True
 
     return False
-
-# --- AUTO REPLIES ---
-def auto_reply(token,chat_id,text):
-
-    t=text.lower()
-
-    if "скільки" in t or "ціна" in t:
-        send_message(token,chat_id,"💅 Напиши 'Прайс' і я покажу всі ціни 😉")
-        return True
-
-    if "запис" in t:
-        send_message(token,chat_id,"Натисни '📅 Записатися'")
-        return True
-
-    return False
-
-# --- PORTFOLIO ---
-def show_portfolio(token, chat_id):
-    send_photo(token, chat_id, "https://i.imgur.com/1.jpg")
-    send_photo(token, chat_id, "https://i.imgur.com/2.jpg")
-
-# --- REMINDER (🔥 ТОП) ---
-def reminder_loop():
-    while True:
-        now = datetime.now().strftime("%d.%m %H:%M")
-
-        cursor.execute("SELECT bot_token,user_id,service,date,time FROM bookings")
-        for b in cursor.fetchall():
-            if f"{b[3]} {b[4]}" == now:
-                send_message(b[0], b[1],
-                f"🔔 Нагадування!\nСьогодні у тебе {b[2]} о {b[4]}")
-
-        time.sleep(60)
-
-threading.Thread(target=reminder_loop, daemon=True).start()
 
 # --- COMMANDS ---
 def handle_commands(token,chat_id,text):
 
-    if text == "/start":
+    if text in ["/start","🏠 Меню"]:
         show_menu(token,chat_id)
         return True
 
     if text == "💅 Прайс":
         services=get_services(token)
 
-        msg="💅 Прайс:\n\n"
-        for s in services:
-            msg+=f"{s[0]} — {s[1]} Kč\n"
+        if not services:
+            send_keyboard(token,chat_id,"Прайс пустий",[["🏠 Меню"]])
+            return True
 
-        send_message(token,chat_id,msg)
+        msg="💅 Прайс:\n\n"
+        for name,price in services:
+            msg+=f"• {name} — {price} Kč\n"
+
+        send_keyboard(token,chat_id,msg,[["🏠 Меню"]])
         return True
 
     if text == "📖 Мій запис":
         b=get_user_booking(token,chat_id)
 
         if not b:
-            send_message(token,chat_id,"Немає запису")
+            send_keyboard(token,chat_id,"Немає запису",[["🏠 Меню"]])
             return True
 
-        send_message(token,chat_id,f"""
+        send_keyboard(token,chat_id,f"""
 📅 Твій запис:
 
 💅 {b[0]}
 📅 {b[1]}
 🕒 {b[2]}
-""")
-        return True
-
-    if text == "🖼 Роботи":
-        show_portfolio(token,chat_id)
+""",[["🏠 Меню"]])
         return True
 
     if text == "❌ Скасувати запис":
         delete_booking(token,chat_id)
-        send_message(token,chat_id,"❌ Запис скасовано")
-        show_menu(token,chat_id)
+        send_keyboard(token,chat_id,"❌ Запис скасовано",[["🏠 Меню"]])
         return True
 
     return False
@@ -317,10 +269,7 @@ def webhook(token):
     if handle_commands(token,chat_id,text):
         return "ok"
 
-    if auto_reply(token,chat_id,text):
-        return "ok"
-
-    send_message(token,chat_id,"Напиши /start")
+    show_menu(token,chat_id)
     return "ok"
 
 # --- CONNECT ---
