@@ -1,11 +1,7 @@
 import requests
 import sqlite3
 from flask import Flask, request
-import os
-import json
 from datetime import datetime, timedelta
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
 
@@ -33,15 +29,16 @@ CREATE TABLE IF NOT EXISTS services (
 
 conn.commit()
 
-# --- 🔥 ГРАФІК РОБОТИ ---
-WORK_DAYS = [0,1,2,3,4,5]  # Пн-Сб
+# --- ГРАФІК ---
+WORK_DAYS = [0,1,2,3,4,5]
+
 DAY_SLOTS = {
     0: ["10:00","12:00","14:00","16:00"],
     1: ["10:00","12:00","14:00","16:00"],
     2: ["10:00","12:00","14:00","16:00"],
     3: ["10:00","12:00","14:00","16:00"],
     4: ["10:00","12:00","14:00","16:00"],
-    5: ["10:00","12:00","14:00"],  # субота короткий день
+    5: ["10:00","12:00","14:00"],
 }
 
 # --- ADMIN ---
@@ -78,7 +75,8 @@ def show_menu(token, chat_id):
     send_keyboard(token, chat_id, "💅 Обери дію:", [
         ["📅 Записатися"],
         ["💅 Прайс"],
-        ["📖 Мої записи"]
+        ["📖 Мій запис"],
+        ["❌ Скасувати запис"]
     ])
 
 # --- SERVICES ---
@@ -98,9 +96,11 @@ def show_services(token, chat_id):
         return
 
     buttons = [[s[0]] for s in services]
+    buttons.append(["🔙 Назад"])
+
     send_keyboard(token, chat_id, "💅 Обери послугу:", buttons)
 
-# --- 📅 ДАТИ ---
+# --- ДАТИ ---
 def show_dates(token, chat_id):
     today = datetime.now()
     buttons = []
@@ -111,8 +111,9 @@ def show_dates(token, chat_id):
         if d.weekday() not in WORK_DAYS:
             continue
 
-        label = d.strftime("%d.%m")
-        buttons.append([label])
+        buttons.append([d.strftime("%d.%m")])
+
+    buttons.append(["🔙 Назад"])
 
     send_keyboard(token, chat_id, "📅 Обери дату:", buttons)
 
@@ -132,18 +133,24 @@ def save_booking(token,user_id,service,date,time):
     )
     conn.commit()
 
-def get_bookings(token):
+def get_user_booking(token,user_id):
     cursor.execute("""
-    SELECT service,date,time FROM bookings WHERE bot_token=?
-    """,(token,))
-    return cursor.fetchall()
+    SELECT service,date,time FROM bookings
+    WHERE bot_token=? AND user_id=?
+    """,(token,user_id))
+    return cursor.fetchone()
 
-# --- 🕒 ЧАС ---
+def delete_booking(token,user_id):
+    cursor.execute("""
+    DELETE FROM bookings WHERE bot_token=? AND user_id=?
+    """,(token,user_id))
+    conn.commit()
+
+# --- ЧАС ---
 def show_times(token, chat_id, date):
 
     try:
-        d = datetime.strptime(date, "%d.%m")
-        weekday = d.weekday()
+        weekday = datetime.strptime(date,"%d.%m").weekday()
     except:
         weekday = datetime.now().weekday()
 
@@ -153,9 +160,12 @@ def show_times(token, chat_id, date):
 
     if not free:
         send_message(token, chat_id, "❌ Немає місць")
+        show_menu(token, chat_id)
         return
 
     buttons = [[t] for t in free]
+    buttons.append(["🔙 Назад"])
+
     send_keyboard(token, chat_id, "🕒 Обери час:", buttons)
 
 # --- BOOKING FLOW ---
@@ -163,6 +173,11 @@ def handle_booking(token,chat_id,text):
 
     key=f"{token}_{chat_id}"
     state=user_states.get(key)
+
+    if text == "🔙 Назад":
+        user_states.pop(key, None)
+        show_menu(token, chat_id)
+        return True
 
     if text == "📅 Записатися":
         user_states[key]={"step":"service"}
@@ -250,18 +265,26 @@ def handle_commands(token,chat_id,text):
         send_message(token,chat_id,msg)
         return True
 
-    if text == "📖 Мої записи":
-        b=get_bookings(token)
+    if text == "📖 Мій запис":
+        b=get_user_booking(token,chat_id)
 
         if not b:
-            send_message(token,chat_id,"Немає записів")
+            send_message(token,chat_id,"Немає запису")
             return True
 
-        msg="📅 Записи:\n\n"
-        for i in b:
-            msg+=f"{i[0]} | {i[1]} | {i[2]}\n"
+        send_message(token,chat_id,f"""
+📅 Твій запис:
 
-        send_message(token,chat_id,msg)
+💅 {b[0]}
+📅 {b[1]}
+🕒 {b[2]}
+""")
+        return True
+
+    if text == "❌ Скасувати запис":
+        delete_booking(token,chat_id)
+        send_message(token,chat_id,"❌ Запис скасовано")
+        show_menu(token,chat_id)
         return True
 
     return False
