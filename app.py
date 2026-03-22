@@ -329,4 +329,12 @@ def webhook():
 
     return "ok"
 
+def set_webhook():
+    url = "https://telegram-ai-bot-7qbx.onrender.com/webhook"
+    requests.get(
+        f"https://api.telegram.org/bot 8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc/setWebhook?url={url}"
+    )
+
+set_webhook()
+
 app.run(host="0.0.0.0", port=10000)
