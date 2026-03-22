@@ -103,6 +103,13 @@ def analyze_and_save(user_id, text):
                         "content": """
 Виділи тільки важливі факти.
 
+Що важливо:
+- гроші
+- цілі
+- плани
+- звички
+- проблеми
+
 Формат JSON:
 {"категорія": {"ключ": "значення"}}
 
@@ -173,7 +180,7 @@ def analyze_image(file_id):
     except:
         return "Не зміг обробити фото"
 
-# --- 🔥 VOICE (РЕАЛЬНИЙ) ---
+# --- VOICE ---
 def handle_voice(file_id):
     try:
         file = requests.get(
@@ -202,31 +209,37 @@ def handle_voice(file_id):
     except Exception as e:
         return f"Помилка голосу: {str(e)}"
 
-# --- COMMANDS ---
+# --- COMMANDS (UPGRADED) ---
 def handle_commands(chat_id, text):
     t = text.lower()
 
-    if "графік" in t:
-        send_photo(chat_id,
+    if any(word in t for word in ["графік", "coinglass", "лонг", "шорт", "funding"]):
+        send_photo(
+            chat_id,
             "https://www.coinglass.com/pro/funding_rate",
-            "📊 Funding rate")
+            "📊 Long/Short + Funding Rate"
+        )
         return True
 
     if "відео" in t:
-        send_video(chat_id,
+        send_video(
+            chat_id,
             "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4",
-            "🎬 Відео")
+            "🎬 Відео"
+        )
         return True
 
     if "документ" in t:
-        send_document(chat_id,
+        send_document(
+            chat_id,
             "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
-            "📄 Документ")
+            "📄 Документ"
+        )
         return True
 
     return False
 
-# --- AI ---
+# --- AI (UPGRADED) ---
 def ask_ai(user_id, message):
 
     history = get_history(user_id)
@@ -235,14 +248,20 @@ def ask_ai(user_id, message):
     messages = [{
         "role": "system",
         "content": f"""
-Ти персональний AI асистент.
+Ти топовий AI асистент.
 
-ТИ МАЄШ ПАМʼЯТЬ:
-{memory}
+ТИ:
+- маєш памʼять
+- знаєш користувача
+- аналізуєш
+- допомагаєш
 
 НЕ кажи що не памʼятаєш.
 
-Будь коротким і корисним.
+ПАМʼЯТЬ:
+{memory}
+
+Будь живим, розумним і корисним.
 """
     }]
 
@@ -265,7 +284,7 @@ def ask_ai(user_id, message):
         data = response.json()
 
         if "choices" not in data:
-            return f"Помилка: {data}"
+            return "⚠️ Помилка AI, спробуй ще раз"
 
         return data["choices"][0]["message"]["content"]
 
