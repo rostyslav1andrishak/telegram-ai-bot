@@ -3,6 +3,7 @@ import sqlite3
 from flask import Flask, request
 import os
 import json
+from datetime import datetime, timedelta
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -19,25 +20,6 @@ CREATE TABLE IF NOT EXISTS bookings (
     service TEXT,
     date TEXT,
     time TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS messages (
-    bot_token TEXT,
-    user_id INTEGER,
-    role TEXT,
-    text TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS facts (
-    bot_token TEXT,
-    user_id INTEGER,
-    category TEXT,
-    key TEXT,
-    value TEXT
 )
 """)
 
@@ -64,44 +46,33 @@ def set_admin(token, user_id):
 def send_message(token, chat_id, text):
     requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text[:4000]}
+        json={"chat_id": chat_id, "text": text}
     )
 
 def send_keyboard(token, chat_id, text, buttons):
-    keyboard = {
-        "keyboard": buttons,
-        "resize_keyboard": True
-    }
-
     requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
         json={
             "chat_id": chat_id,
             "text": text,
-            "reply_markup": keyboard
+            "reply_markup": {
+                "keyboard": buttons,
+                "resize_keyboard": True
+            }
         }
     )
 
 # --- MENU ---
 def show_menu(token, chat_id):
-    send_keyboard(
-        token,
-        chat_id,
-        "💅 Обери дію:",
-        [
-            ["📅 Записатися"],
-            ["💅 Прайс"],
-            ["📖 Мої записи"]
-        ]
-    )
+    send_keyboard(token, chat_id, "💅 Обери дію:", [
+        ["📅 Записатися"],
+        ["💅 Прайс"],
+        ["📖 Мої записи"]
+    ])
 
 # --- SERVICES ---
 def add_service(token, name, price):
     cursor.execute("INSERT INTO services VALUES (?, ?, ?)", (token, name, price))
-    conn.commit()
-
-def delete_service(token, name):
-    cursor.execute("DELETE FROM services WHERE bot_token=? AND name=?", (token, name))
     conn.commit()
 
 def get_services(token):
@@ -117,6 +88,18 @@ def show_services(token, chat_id):
 
     buttons = [[s[0]] for s in services]
     send_keyboard(token, chat_id, "💅 Обери послугу:", buttons)
+
+# --- DATE PICKER ---
+def show_dates(token, chat_id):
+    today = datetime.now()
+    dates = []
+
+    for i in range(5):
+        d = today + timedelta(days=i)
+        dates.append(d.strftime("%d.%m"))
+
+    buttons = [[d] for d in dates]
+    send_keyboard(token, chat_id, "📅 Обери дату:", buttons)
 
 # --- BOOKINGS ---
 AVAILABLE_SLOTS = ["10:00","12:00","14:00","16:00"]
@@ -168,7 +151,7 @@ def handle_booking(token,chat_id,text):
     if state["step"]=="service":
         state["service"]=text
         state["step"]="date"
-        send_message(token,chat_id,"📅 Напиши дату (25.03)")
+        show_dates(token, chat_id)  # 🔥 ОНОВЛЕНО
         return True
 
     elif state["step"]=="date":
@@ -200,9 +183,7 @@ def handle_booking(token,chat_id,text):
 # --- ADMIN ---
 def handle_admin(token,chat_id,text):
 
-    t=text.lower()
-
-    if "/admin" in t:
+    if "/admin" in text:
         set_admin(token,chat_id)
         send_message(token,chat_id,"🔐 Ти адмін")
         return True
@@ -210,35 +191,17 @@ def handle_admin(token,chat_id,text):
     if not is_admin(token,chat_id):
         return False
 
-    lines = text.split("\n")
-    added = []
+    if "додай послугу" in text:
+        try:
+            parts = text.split()
+            price = parts[-1]
+            name = " ".join(parts[2:-1])
 
-    for line in lines:
-        l=line.strip().lower()
-
-        if l.startswith("додай послугу"):
-            try:
-                parts=line.split()
-                price=parts[-1]
-                name=" ".join(parts[2:-1])
-
-                add_service(token,name,price)
-                added.append(f"✅ {name} — {price}")
-            except:
-                pass
-
-        elif l.startswith("видали послугу"):
-            try:
-                parts=line.split()
-                name=" ".join(parts[2:])
-                delete_service(token,name)
-                added.append(f"❌ {name}")
-            except:
-                pass
-
-    if added:
-        send_message(token,chat_id,"\n".join(added))
-        return True
+            add_service(token,name,price)
+            send_message(token,chat_id,f"✅ {name} — {price}")
+            return True
+        except:
+            pass
 
     return False
 
@@ -252,10 +215,6 @@ def handle_commands(token,chat_id,text):
     if text == "💅 Прайс":
         services=get_services(token)
 
-        if not services:
-            send_message(token,chat_id,"Прайс пустий")
-            return True
-
         msg="💅 Прайс:\n\n"
         for s in services:
             msg+=f"{s[0]} — {s[1]} Kč\n"
@@ -265,10 +224,6 @@ def handle_commands(token,chat_id,text):
 
     if text == "📖 Мої записи":
         b=get_bookings(token)
-
-        if not b:
-            send_message(token,chat_id,"Немає записів")
-            return True
 
         msg="📅 Записи:\n\n"
         for i in b:
@@ -290,11 +245,7 @@ def webhook(token):
         return "ok"
 
     chat_id=message["chat"]["id"]
-
-    if "text" in message:
-        text=message["text"]
-    else:
-        text=""
+    text=message.get("text","")
 
     if handle_admin(token,chat_id,text):
         return "ok"
