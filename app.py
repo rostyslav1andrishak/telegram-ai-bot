@@ -33,6 +33,17 @@ CREATE TABLE IF NOT EXISTS services (
 
 conn.commit()
 
+# --- 🔥 ГРАФІК РОБОТИ ---
+WORK_DAYS = [0,1,2,3,4,5]  # Пн-Сб
+DAY_SLOTS = {
+    0: ["10:00","12:00","14:00","16:00"],
+    1: ["10:00","12:00","14:00","16:00"],
+    2: ["10:00","12:00","14:00","16:00"],
+    3: ["10:00","12:00","14:00","16:00"],
+    4: ["10:00","12:00","14:00","16:00"],
+    5: ["10:00","12:00","14:00"],  # субота короткий день
+}
+
 # --- ADMIN ---
 admins = {}
 
@@ -89,20 +100,23 @@ def show_services(token, chat_id):
     buttons = [[s[0]] for s in services]
     send_keyboard(token, chat_id, "💅 Обери послугу:", buttons)
 
-# --- DATE PICKER ---
+# --- 📅 ДАТИ ---
 def show_dates(token, chat_id):
     today = datetime.now()
-    dates = []
+    buttons = []
 
-    for i in range(5):
+    for i in range(7):
         d = today + timedelta(days=i)
-        dates.append(d.strftime("%d.%m"))
 
-    buttons = [[d] for d in dates]
+        if d.weekday() not in WORK_DAYS:
+            continue
+
+        label = d.strftime("%d.%m")
+        buttons.append([label])
+
     send_keyboard(token, chat_id, "📅 Обери дату:", buttons)
 
 # --- BOOKINGS ---
-AVAILABLE_SLOTS = ["10:00","12:00","14:00","16:00"]
 user_states = {}
 
 def is_taken(token,date,time):
@@ -124,8 +138,18 @@ def get_bookings(token):
     """,(token,))
     return cursor.fetchall()
 
+# --- 🕒 ЧАС ---
 def show_times(token, chat_id, date):
-    free = [t for t in AVAILABLE_SLOTS if not is_taken(token, date, t)]
+
+    try:
+        d = datetime.strptime(date, "%d.%m")
+        weekday = d.weekday()
+    except:
+        weekday = datetime.now().weekday()
+
+    slots = DAY_SLOTS.get(weekday, [])
+
+    free = [t for t in slots if not is_taken(token, date, t)]
 
     if not free:
         send_message(token, chat_id, "❌ Немає місць")
@@ -151,7 +175,7 @@ def handle_booking(token,chat_id,text):
     if state["step"]=="service":
         state["service"]=text
         state["step"]="date"
-        show_dates(token, chat_id)  # 🔥 ОНОВЛЕНО
+        show_dates(token, chat_id)
         return True
 
     elif state["step"]=="date":
@@ -215,6 +239,10 @@ def handle_commands(token,chat_id,text):
     if text == "💅 Прайс":
         services=get_services(token)
 
+        if not services:
+            send_message(token,chat_id,"Прайс пустий")
+            return True
+
         msg="💅 Прайс:\n\n"
         for s in services:
             msg+=f"{s[0]} — {s[1]} Kč\n"
@@ -224,6 +252,10 @@ def handle_commands(token,chat_id,text):
 
     if text == "📖 Мої записи":
         b=get_bookings(token)
+
+        if not b:
+            send_message(token,chat_id,"Немає записів")
+            return True
 
         msg="📅 Записи:\n\n"
         for i in b:
