@@ -67,10 +67,32 @@ def send_message(token, chat_id, text):
         json={"chat_id": chat_id, "text": text[:4000]}
     )
 
-def send_photo(token, chat_id, url, caption=""):
+def send_keyboard(token, chat_id, text, buttons):
+    keyboard = {
+        "keyboard": buttons,
+        "resize_keyboard": True
+    }
+
     requests.post(
-        f"https://api.telegram.org/bot{token}/sendPhoto",
-        json={"chat_id": chat_id, "photo": url, "caption": caption}
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "reply_markup": keyboard
+        }
+    )
+
+# --- MENU ---
+def show_menu(token, chat_id):
+    send_keyboard(
+        token,
+        chat_id,
+        "💅 Обери дію:",
+        [
+            ["📅 Записатися"],
+            ["💅 Прайс"],
+            ["📖 Мої записи"]
+        ]
     )
 
 # --- SERVICES ---
@@ -86,75 +108,15 @@ def get_services(token):
     cursor.execute("SELECT name, price FROM services WHERE bot_token=?", (token,))
     return cursor.fetchall()
 
-# --- HISTORY ---
-def save_message(token, user_id, role, text):
-    cursor.execute(
-        "INSERT INTO messages VALUES (?, ?, ?, ?)",
-        (token, user_id, role, text)
-    )
-    conn.commit()
+def show_services(token, chat_id):
+    services = get_services(token)
 
-def get_history(token, user_id):
-    cursor.execute("""
-        SELECT role, text FROM messages
-        WHERE bot_token=? AND user_id=?
-        ORDER BY rowid DESC LIMIT 10
-    """, (token, user_id))
-    rows = cursor.fetchall()
-    return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
-
-# --- MEMORY ---
-def get_memory(token, user_id):
-    cursor.execute("""
-        SELECT category, key, value FROM facts
-        WHERE bot_token=? AND user_id=?
-    """, (token, user_id))
-    rows = cursor.fetchall()
-    return "\n".join([f"[{c}] {k}: {v}" for c,k,v in rows]) if rows else "немає"
-
-def save_facts(token, user_id, facts):
-    for category, values in facts.items():
-        for k,v in values.items():
-            cursor.execute("""
-            DELETE FROM facts WHERE bot_token=? AND user_id=? AND category=? AND key=?
-            """,(token,user_id,category,k))
-
-            cursor.execute("""
-            INSERT INTO facts VALUES (?, ?, ?, ?, ?)
-            """,(token,user_id,category,k,v))
-    conn.commit()
-
-# --- SMART MEMORY ---
-def analyze_and_save(token, user_id, text):
-    if len(text) < 8:
+    if not services:
+        send_message(token, chat_id, "❌ Немає послуг")
         return
 
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            json={
-                "model": "gpt-4o-mini",
-                "messages":[
-                    {"role":"system","content":"Виділи важливі факти JSON"},
-                    {"role":"user","content":text}
-                ]
-            }
-        )
-
-        data = response.json()
-        if "choices" not in data:
-            return
-
-        content = data["choices"][0]["message"]["content"]
-
-        try:
-            facts = json.loads(content)
-            save_facts(token,user_id,facts)
-        except:
-            pass
-    except:
-        pass
+    buttons = [[s[0]] for s in services]
+    send_keyboard(token, chat_id, "💅 Обери послугу:", buttons)
 
 # --- BOOKINGS ---
 AVAILABLE_SLOTS = ["10:00","12:00","14:00","16:00"]
@@ -179,37 +141,40 @@ def get_bookings(token):
     """,(token,))
     return cursor.fetchall()
 
+def show_times(token, chat_id, date):
+    free = [t for t in AVAILABLE_SLOTS if not is_taken(token, date, t)]
+
+    if not free:
+        send_message(token, chat_id, "❌ Немає місць")
+        return
+
+    buttons = [[t] for t in free]
+    send_keyboard(token, chat_id, "🕒 Обери час:", buttons)
+
 # --- BOOKING FLOW ---
 def handle_booking(token,chat_id,text):
 
     key=f"{token}_{chat_id}"
     state=user_states.get(key)
 
+    if text == "📅 Записатися":
+        user_states[key]={"step":"service"}
+        show_services(token,chat_id)
+        return True
+
     if not state:
-        if "запис" in text.lower():
-            user_states[key]={"step":"service"}
-            send_message(token,chat_id,"💅 Яка процедура?")
-            return True
         return False
 
     if state["step"]=="service":
         state["service"]=text
         state["step"]="date"
-        send_message(token,chat_id,"📅 Дата?")
+        send_message(token,chat_id,"📅 Напиши дату (25.03)")
         return True
 
     elif state["step"]=="date":
         state["date"]=text
         state["step"]="time"
-
-        free=[t for t in AVAILABLE_SLOTS if not is_taken(token,text,t)]
-
-        if not free:
-            send_message(token,chat_id,"❌ Немає місць")
-            user_states.pop(key,None)
-            return True
-
-        send_message(token,chat_id,"🕒 Вільно:\n"+ "\n".join(free))
+        show_times(token,chat_id,text)
         return True
 
     elif state["step"]=="time":
@@ -227,17 +192,16 @@ def handle_booking(token,chat_id,text):
 🕒 {text}""")
 
         user_states.pop(key,None)
+        show_menu(token,chat_id)
         return True
 
     return False
 
-# --- ADMIN COMMANDS ---
-
+# --- ADMIN ---
 def handle_admin(token,chat_id,text):
 
     t=text.lower()
 
-    # включення адміна
     if "/admin" in t:
         set_admin(token,chat_id)
         send_message(token,chat_id,"🔐 Ти адмін")
@@ -246,30 +210,27 @@ def handle_admin(token,chat_id,text):
     if not is_admin(token,chat_id):
         return False
 
-    # 🔥 ОБРОБКА БАГАТЬОХ РЯДКІВ
     lines = text.split("\n")
-
     added = []
 
     for line in lines:
-        l = line.strip().lower()
+        l=line.strip().lower()
 
         if l.startswith("додай послугу"):
             try:
-                parts = line.split()
-                price = parts[-1]
-                name = " ".join(parts[2:-1])
+                parts=line.split()
+                price=parts[-1]
+                name=" ".join(parts[2:-1])
 
                 add_service(token,name,price)
                 added.append(f"✅ {name} — {price}")
-
             except:
                 pass
 
         elif l.startswith("видали послугу"):
             try:
-                parts = line.split()
-                name = " ".join(parts[2:])
+                parts=line.split()
+                name=" ".join(parts[2:])
                 delete_service(token,name)
                 added.append(f"❌ {name}")
             except:
@@ -284,9 +245,11 @@ def handle_admin(token,chat_id,text):
 # --- COMMANDS ---
 def handle_commands(token,chat_id,text):
 
-    t=text.lower()
+    if text == "/start":
+        show_menu(token,chat_id)
+        return True
 
-    if "прайс" in t:
+    if text == "💅 Прайс":
         services=get_services(token)
 
         if not services:
@@ -300,7 +263,7 @@ def handle_commands(token,chat_id,text):
         send_message(token,chat_id,msg)
         return True
 
-    if "мої записи" in t:
+    if text == "📖 Мої записи":
         b=get_bookings(token)
 
         if not b:
@@ -316,46 +279,6 @@ def handle_commands(token,chat_id,text):
 
     return False
 
-# --- AI ---
-def ask_ai(token,user_id,message):
-
-    history=get_history(token,user_id)
-    memory=get_memory(token,user_id)
-
-    messages=[{
-        "role":"system",
-        "content":f"""
-Ти AI адміністратор салону.
-
-ПАМʼЯТЬ:
-{memory}
-
-Відповідай коротко і приємно.
-"""
-    }]
-
-    messages+=history
-    messages.append({"role":"user","content":message})
-
-    r=requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization":f"Bearer {OPENAI_API_KEY}",
-            "Content-Type":"application/json"
-        },
-        json={
-            "model":"gpt-4o-mini",
-            "messages":messages
-        }
-    )
-
-    data=r.json()
-
-    if "choices" not in data:
-        return "Помилка"
-
-    return data["choices"][0]["message"]["content"]
-
 # --- WEBHOOK ---
 @app.route("/webhook/<token>",methods=["POST"])
 def webhook(token):
@@ -370,17 +293,8 @@ def webhook(token):
 
     if "text" in message:
         text=message["text"]
-
-    elif "photo" in message:
-        file_id=message["photo"][-1]["file_id"]
-        text=analyze_image(token,file_id)
-
-    elif "voice" in message:
-        file_id=message["voice"]["file_id"]
-        text=handle_voice(token,file_id)
-
     else:
-        text="Не підтримую"
+        text=""
 
     if handle_admin(token,chat_id,text):
         return "ok"
@@ -391,14 +305,7 @@ def webhook(token):
     if handle_commands(token,chat_id,text):
         return "ok"
 
-    save_message(token,chat_id,"user",text)
-    analyze_and_save(token,chat_id,text)
-
-    reply=ask_ai(token,chat_id,text)
-
-    save_message(token,chat_id,"assistant",reply)
-    send_message(token,chat_id,reply)
-
+    send_message(token,chat_id,"Напиши /start")
     return "ok"
 
 # --- CONNECT ---
