@@ -41,7 +41,24 @@ CREATE TABLE IF NOT EXISTS facts (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS services (
+    bot_token TEXT,
+    name TEXT,
+    price TEXT
+)
+""")
+
 conn.commit()
+
+# --- ADMIN ---
+admins = {}
+
+def is_admin(token, user_id):
+    return admins.get(token) == user_id
+
+def set_admin(token, user_id):
+    admins[token] = user_id
 
 # --- TELEGRAM ---
 def send_message(token, chat_id, text):
@@ -55,6 +72,19 @@ def send_photo(token, chat_id, url, caption=""):
         f"https://api.telegram.org/bot{token}/sendPhoto",
         json={"chat_id": chat_id, "photo": url, "caption": caption}
     )
+
+# --- SERVICES ---
+def add_service(token, name, price):
+    cursor.execute("INSERT INTO services VALUES (?, ?, ?)", (token, name, price))
+    conn.commit()
+
+def delete_service(token, name):
+    cursor.execute("DELETE FROM services WHERE bot_token=? AND name=?", (token, name))
+    conn.commit()
+
+def get_services(token):
+    cursor.execute("SELECT name, price FROM services WHERE bot_token=?", (token,))
+    return cursor.fetchall()
 
 # --- HISTORY ---
 def save_message(token, user_id, role, text):
@@ -80,7 +110,6 @@ def get_memory(token, user_id):
         WHERE bot_token=? AND user_id=?
     """, (token, user_id))
     rows = cursor.fetchall()
-
     return "\n".join([f"[{c}] {k}: {v}" for c,k,v in rows]) if rows else "немає"
 
 def save_facts(token, user_id, facts):
@@ -202,60 +231,55 @@ def handle_booking(token,chat_id,text):
 
     return False
 
-# --- IMAGE ---
-def analyze_image(token,file_id):
-    file=requests.get(
-        f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
-    ).json()
+# --- ADMIN COMMANDS ---
 
-    file_path=file["result"]["file_path"]
-    url=f"https://api.telegram.org/file/bot{token}/{file_path}"
+def handle_admin(token,chat_id,text):
 
-    try:
-        r=requests.post(
-            "https://api.openai.com/v1/responses",
-            headers={"Authorization":f"Bearer {OPENAI_API_KEY}"},
-            json={
-                "model":"gpt-4o-mini",
-                "input":[
-                    {
-                        "role":"user",
-                        "content":[
-                            {"type":"input_text","text":"Опиши фото"},
-                            {"type":"input_image","image_url":url}
-                        ]
-                    }
-                ]
-            }
-        )
-        return r.json()["output"][0]["content"][0]["text"]
-    except:
-        return "Не зміг обробити фото"
+    t=text.lower()
 
-# --- VOICE ---
-def handle_voice(token,file_id):
-    try:
-        file=requests.get(
-            f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
-        ).json()
+    # включення адміна
+    if "/admin" in t:
+        set_admin(token,chat_id)
+        send_message(token,chat_id,"🔐 Ти адмін")
+        return True
 
-        file_path=file["result"]["file_path"]
-        url=f"https://api.telegram.org/file/bot{token}/{file_path}"
+    if not is_admin(token,chat_id):
+        return False
 
-        audio=requests.get(url).content
+    # 🔥 ОБРОБКА БАГАТЬОХ РЯДКІВ
+    lines = text.split("\n")
 
-        r=requests.post(
-            "https://api.openai.com/v1/audio/transcriptions",
-            headers={"Authorization":f"Bearer {OPENAI_API_KEY}"},
-            files={
-                "file":("voice.ogg",audio),
-                "model":(None,"gpt-4o-mini-transcribe")
-            }
-        )
+    added = []
 
-        return r.json().get("text","не розпізнано")
-    except:
-        return "Помилка голосу"
+    for line in lines:
+        l = line.strip().lower()
+
+        if l.startswith("додай послугу"):
+            try:
+                parts = line.split()
+                price = parts[-1]
+                name = " ".join(parts[2:-1])
+
+                add_service(token,name,price)
+                added.append(f"✅ {name} — {price}")
+
+            except:
+                pass
+
+        elif l.startswith("видали послугу"):
+            try:
+                parts = line.split()
+                name = " ".join(parts[2:])
+                delete_service(token,name)
+                added.append(f"❌ {name}")
+            except:
+                pass
+
+    if added:
+        send_message(token,chat_id,"\n".join(added))
+        return True
+
+    return False
 
 # --- COMMANDS ---
 def handle_commands(token,chat_id,text):
@@ -263,8 +287,17 @@ def handle_commands(token,chat_id,text):
     t=text.lower()
 
     if "прайс" in t:
-        send_message(token,chat_id,
-        "💅 Манікюр — 600 Kč\nПедикюр — 800 Kč\nВії — 1200 Kč")
+        services=get_services(token)
+
+        if not services:
+            send_message(token,chat_id,"Прайс пустий")
+            return True
+
+        msg="💅 Прайс:\n\n"
+        for s in services:
+            msg+=f"{s[0]} — {s[1]} Kč\n"
+
+        send_message(token,chat_id,msg)
         return True
 
     if "мої записи" in t:
@@ -349,6 +382,9 @@ def webhook(token):
     else:
         text="Не підтримую"
 
+    if handle_admin(token,chat_id,text):
+        return "ok"
+
     if handle_booking(token,chat_id,text):
         return "ok"
 
@@ -365,15 +401,13 @@ def webhook(token):
 
     return "ok"
 
-# --- CONNECT BOT ---
+# --- CONNECT ---
 def connect_bot(token):
     url = f"https://telegram-ai-bot-7qbx.onrender.com/webhook/{token}"
     requests.get(
         f"https://api.telegram.org/bot{token}/setWebhook?url={url}"
     )
 
-# 🔥 ПІДКЛЮЧАЄМО БОТА
 connect_bot("8741891429:AAF2IQ_6Mtx741sS2Jevu7eQgQaQGK7yCms")
 
-# 🚀 ЗАПУСК
 app.run(host="0.0.0.0", port=10000)
