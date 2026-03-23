@@ -115,15 +115,14 @@ def handle_admin(token,chat_id,text):
         admin_mode[chat_id] = True
 
         send_keyboard(token,chat_id,
-        """🔐 Адмін режим
-
-Манікюр 600
-
-Вихідний 25.03
-Закрити 14:00 26.03
-Відкрити 14:00 26.03
-""",
-        [["🏠 Вийти"]])
+        "🔐 Адмін режим\n\nОбери дію або просто пиши текст 👇",
+        [
+            ["➕ Додати послугу"],
+            ["🗑 Очистити послуги"],
+            ["📋 Список послуг"],
+            ["📅 Графік"],
+            ["🏠 Вийти"]
+        ])
         return True
 
     if not is_admin(token,chat_id):
@@ -136,6 +135,39 @@ def handle_admin(token,chat_id,text):
 
     if not admin_mode.get(chat_id):
         return False
+
+    # --- КНОПКИ ---
+    if text == "➕ Додати послугу":
+        send_keyboard(token,chat_id,
+        "Напиши послугу:\nНаприклад:\nМанікюр 600",
+        [["🏠 Вийти"]])
+        return True
+
+    if text == "🗑 Очистити послуги":
+        cursor.execute("DELETE FROM services WHERE bot_token=?", (token,))
+        conn.commit()
+        send_keyboard(token,chat_id,"✅ Всі послуги видалено",[["🏠 Вийти"]])
+        return True
+
+    if text == "📋 Список послуг":
+        s = get_services(token)
+
+        if not s:
+            send_keyboard(token,chat_id,"❌ Немає послуг",[["🏠 Вийти"]])
+            return True
+
+        msg = "📋 Послуги:\n\n"
+        for i in s:
+            msg += f"{i[0]} — {i[1]} Kč\n"
+
+        send_keyboard(token,chat_id,msg,[["🏠 Вийти"]])
+        return True
+
+    if text == "📅 Графік":
+        send_keyboard(token,chat_id,
+        "Напиши:\nВихідний 25.03\nЗакрити 14:00 26.03\nВідкрити 14:00 26.03",
+        [["🏠 Вийти"]])
+        return True
 
     t = text.lower()
 
@@ -161,7 +193,7 @@ def handle_admin(token,chat_id,text):
     except:
         pass
 
-    # --- ПОСЛУГИ ---
+    # --- ПОСЛУГИ (розумне додавання) ---
     lines = text.split("\n")
     added = []
 
@@ -184,7 +216,7 @@ def handle_admin(token,chat_id,text):
         send_keyboard(token,chat_id,"\n".join(added),[["🏠 Вийти"]])
         return True
 
-    return False
+    return True
 
 # --- SERVICES ---
 def get_services(token):
