@@ -44,6 +44,7 @@ DAY_SLOTS = {
 # --- ADMIN ---
 admins = {}
 admin_states = {}
+admin_mode = {}
 
 def is_admin(token, user_id):
     return admins.get(token) == user_id
@@ -103,7 +104,6 @@ def clear_services(token):
 # --- CATEGORY ---
 def get_services_structured(token):
     services = get_services(token)
-
     categories = {}
 
     for name, price in services:
@@ -119,6 +119,10 @@ def get_services_structured(token):
 def show_categories(token, chat_id):
     categories = get_services_structured(token)
 
+    if not categories:
+        send_keyboard(token, chat_id, "❌ Немає послуг", [["🏠 Меню"]])
+        return
+
     buttons = [[c] for c in categories]
     buttons.append(["🏠 Меню"])
 
@@ -133,10 +137,9 @@ def show_services_by_category(token, chat_id, category):
 
     send_keyboard(token, chat_id, category, buttons)
 
-# --- DATE (BOOKSY STYLE) ---
+# --- DATE ---
 def show_dates(token, chat_id):
     today = datetime.now()
-
     buttons = []
 
     for i in range(5):
@@ -174,18 +177,18 @@ def save_booking(token,user_id,service,date,time):
     )
     conn.commit()
 
+def delete_booking(token,user_id):
+    cursor.execute("""
+    DELETE FROM bookings WHERE bot_token=? AND user_id=?
+    """,(token,user_id))
+    conn.commit()
+
 def get_user_booking(token,user_id):
     cursor.execute("""
     SELECT service,date,time FROM bookings
     WHERE bot_token=? AND user_id=?
     """,(token,user_id))
     return cursor.fetchone()
-
-def delete_booking(token,user_id):
-    cursor.execute("""
-    DELETE FROM bookings WHERE bot_token=? AND user_id=?
-    """,(token,user_id))
-    conn.commit()
 
 # --- TIME ---
 def show_times(token, chat_id, date):
@@ -198,7 +201,6 @@ def show_times(token, chat_id, date):
         weekday = datetime.now().weekday()
 
     slots = DAY_SLOTS.get(weekday, [])
-
     free = [t for t in slots if not is_taken(token, date_clean, t)]
 
     if not free:
@@ -238,7 +240,7 @@ def handle_booking(token,chat_id,text):
     elif state["step"]=="service":
         state["service"]=text
         state["step"]="date"
-        show_dates(token,chat_id)
+        show_dates(token, chat_id)
         return True
 
     elif state["step"]=="date":
@@ -267,25 +269,34 @@ def handle_booking(token,chat_id,text):
 
     return False
 
-# --- ADMIN HANDLER ---
+# --- ADMIN ---
 def handle_admin(token,chat_id,text):
 
     if text == "/admin":
         set_admin(token,chat_id)
+        admin_mode[chat_id] = True
         show_admin_menu(token,chat_id)
         return True
 
     if not is_admin(token,chat_id):
         return False
 
+    if text == "/start":
+        admin_mode.pop(chat_id, None)
+        show_menu(token,chat_id)
+        return True
+
+    if not admin_mode.get(chat_id):
+        return False
+
     if text == "➕ Додати послугу":
         admin_states[chat_id] = "add_service"
-        send_keyboard(token,chat_id,"Напиши: Назва 1000",[["🏠 Меню"]])
+        send_keyboard(token,chat_id,"Напиши: Манікюр 600",[["⬅️ Назад"]])
         return True
 
     if text == "🗑 Очистити послуги":
         clear_services(token)
-        send_keyboard(token,chat_id,"✅ Очищено",[["🏠 Меню"]])
+        send_keyboard(token,chat_id,"✅ Очищено",[["⬅️ Назад"]])
         return True
 
     if text == "📋 Список послуг":
@@ -295,10 +306,14 @@ def handle_admin(token,chat_id,text):
         for i in s:
             msg+=f"{i[0]} — {i[1]}\n"
 
-        send_keyboard(token,chat_id,msg,[["🏠 Меню"]])
+        send_keyboard(token,chat_id,msg,[["⬅️ Назад"]])
         return True
 
-    # додавання через текст
+    if text == "⬅️ Назад":
+        admin_states.pop(chat_id, None)
+        show_admin_menu(token,chat_id)
+        return True
+
     if admin_states.get(chat_id) == "add_service":
         try:
             parts = text.split()
@@ -307,14 +322,23 @@ def handle_admin(token,chat_id,text):
 
             add_service(token,name,price)
 
-            send_keyboard(token,chat_id,f"✅ {name} — {price}",[["🏠 Меню"]])
-            admin_states.pop(chat_id)
-            return True
-        except:
-            send_keyboard(token,chat_id,"❌ Помилка",[["🏠 Меню"]])
+            send_keyboard(token,chat_id,
+                f"✅ Додано:\n{name} — {price}",
+                [["➕ Додати ще"], ["⬅️ Назад"]]
+            )
+
             return True
 
-    return False
+        except:
+            send_keyboard(token,chat_id,"❌ Помилка",[["⬅️ Назад"]])
+            return True
+
+    if text == "➕ Додати ще":
+        admin_states[chat_id] = "add_service"
+        send_keyboard(token,chat_id,"Напиши наступну",[["⬅️ Назад"]])
+        return True
+
+    return True
 
 # --- COMMANDS ---
 def handle_commands(token,chat_id,text):
