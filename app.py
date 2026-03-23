@@ -52,62 +52,6 @@ DAY_SLOTS = {
 }
 
 # --- ADMIN ---
-admins = {}
-admin_mode = {}
-
-def is_admin(token, user_id):
-    return admins.get(token) == user_id
-
-def set_admin(token, user_id):
-    admins[token] = user_id
-
-# --- TELEGRAM ---
-def send_keyboard(token, chat_id, text, buttons):
-    requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        json={
-            "chat_id": chat_id,
-            "text": text,
-            "reply_markup": {
-                "keyboard": buttons,
-                "resize_keyboard": True
-            }
-        }
-    )
-
-# --- MENU ---
-def show_menu(token, chat_id):
-    send_keyboard(token, chat_id,
-    "💖 Вітаю в салоні!",
-    [
-        ["📅 Записатися"],
-        ["💅 Ціни"],
-        ["📖 Мій запис"],
-        ["❌ Скасувати запис"]
-    ])
-
-# --- SCHEDULE ---
-def set_day_off(token, date):
-    cursor.execute("DELETE FROM schedule WHERE bot_token=? AND date=?", (token, date))
-    for t in ["10:00","12:00","14:00","16:00"]:
-        cursor.execute("INSERT INTO schedule VALUES (?, ?, ?, 0)", (token, date, t))
-    conn.commit()
-
-def close_time(token, date, time):
-    cursor.execute("DELETE FROM schedule WHERE bot_token=? AND date=? AND time=?", (token,date,time))
-    cursor.execute("INSERT INTO schedule VALUES (?, ?, ?, 0)", (token, date, time))
-    conn.commit()
-
-def open_time(token, date, time):
-    cursor.execute("DELETE FROM schedule WHERE bot_token=? AND date=? AND time=?", (token,date,time))
-    conn.commit()
-
-def is_open(token, date, time):
-    cursor.execute("SELECT is_open FROM schedule WHERE bot_token=? AND date=? AND time=?", (token,date,time))
-    r = cursor.fetchone()
-    return True if not r else r[0] == 1
-
-# --- ADMIN ---
 def handle_admin(token,chat_id,text):
 
     if text == "/admin":
