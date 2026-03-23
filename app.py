@@ -43,12 +43,8 @@ conn.commit()
 WORK_DAYS = [0,1,2,3,4,5]
 
 DAY_SLOTS = {
-    0: ["10:00","12:00","14:00","16:00"],
-    1: ["10:00","12:00","14:00","16:00"],
-    2: ["10:00","12:00","14:00","16:00"],
-    3: ["10:00","12:00","14:00","16:00"],
-    4: ["10:00","12:00","14:00","16:00"],
-    5: ["10:00","12:00","14:00"],
+    i: [f"{h:02d}:00" for h in range(8,18)]
+    for i in range(6)
 }
 
 # --- TELEGRAM ---
@@ -71,15 +67,13 @@ def show_menu(token, chat_id):
     "💖 Вітаю в салоні!",
     [
         ["📅 Записатися"],
-        ["💅 Ціни"],
-        ["📖 Мій запис"],
-        ["❌ Скасувати запис"]
+        ["💅 Ціни"]
     ])
 
 # --- SCHEDULE ---
 def set_day_off(token, date):
     cursor.execute("DELETE FROM schedule WHERE bot_token=? AND date=?", (token, date))
-    for t in ["10:00","12:00","14:00","16:00"]:
+    for t in [f"{h:02d}:00" for h in range(8,18)]:
         cursor.execute("INSERT INTO schedule VALUES (?, ?, ?, 0)", (token, date, t))
     conn.commit()
 
@@ -100,6 +94,7 @@ def is_open(token, date, time):
 # --- ADMIN ---
 admins = {}
 admin_mode = {}
+admin_states = {}
 
 def is_admin(token, user_id):
     return admins.get(token) == user_id
@@ -107,6 +102,40 @@ def is_admin(token, user_id):
 def set_admin(token, user_id):
     admins[token] = user_id
 
+# --- ADMIN CALENDAR ---
+def show_admin_dates(token, chat_id):
+    today = datetime.now()
+    buttons = []
+
+    for i in range(7):
+        d = today + timedelta(days=i)
+        buttons.append([d.strftime("%d.%m")])
+
+    buttons.append(["⬅️ Назад"])
+
+    send_keyboard(token, chat_id, "📅 Обери день:", buttons)
+
+def show_admin_times(token, chat_id, date):
+    weekday = datetime.strptime(date,"%d.%m").weekday()
+    slots = DAY_SLOTS.get(weekday, [])
+
+    buttons = []
+
+    for t in slots:
+        if is_taken(token, date, t):
+            status = "🔴"
+        elif not is_open(token, date, t):
+            status = "❌"
+        else:
+            status = "🟢"
+
+        buttons.append([f"{t} {status}"])
+
+    buttons.append(["⬅️ Назад"])
+
+    send_keyboard(token, chat_id, f"🕒 {date}", buttons)
+
+# --- ADMIN ---
 def handle_admin(token,chat_id,text):
 
     if text == "/admin":
@@ -114,12 +143,10 @@ def handle_admin(token,chat_id,text):
         admin_mode[chat_id] = True
 
         send_keyboard(token,chat_id,
-        "🔐 Адмін режим\n\nОбери дію 👇",
+        "🔐 Адмін режим",
         [
             ["➕ Додати послугу"],
-            ["🗑 Очистити послуги"],
-            ["📋 Список послуг"],
-            ["📅 Графік"],
+            ["📅 Календар"],
             ["🏠 Вийти"]
         ])
         return True
@@ -129,63 +156,54 @@ def handle_admin(token,chat_id,text):
 
     if text in ["🏠 Вийти","/start"]:
         admin_mode.pop(chat_id, None)
+        admin_states.pop(chat_id, None)
         show_menu(token,chat_id)
         return True
 
     if not admin_mode.get(chat_id):
         return False
 
-    if text == "➕ Додати послугу":
-        send_keyboard(token,chat_id,"Напиши:\nМанікюр 600",[["🏠 Вийти"]])
+    # --- календар ---
+    if text == "📅 Календар":
+        admin_states[chat_id] = {"step":"date"}
+        show_admin_dates(token, chat_id)
         return True
 
-    if text == "🗑 Очистити послуги":
-        cursor.execute("DELETE FROM services WHERE bot_token=?", (token,))
-        conn.commit()
-        send_keyboard(token,chat_id,"✅ Очищено",[["🏠 Вийти"]])
-        return True
+    state = admin_states.get(chat_id)
 
-    if text == "📋 Список послуг":
-        s = get_services(token)
-        msg = "📋 Послуги:\n\n" + "\n".join([f"{i[0]} — {i[1]} Kč" for i in s]) if s else "❌ Немає послуг"
-        send_keyboard(token,chat_id,msg,[["🏠 Вийти"]])
-        return True
-
-    if text == "📅 Графік":
-        send_keyboard(token,chat_id,
-        "Напиши:\nВихідний 25.03\nЗакрити 14:00 26.03",
-        [["🏠 Вийти"]])
-        return True
-
-    # --- логіка ---
-    try:
-        t = text.lower()
-
-        if "вихідний" in t:
-            date = text.split()[-1]
-            set_day_off(token, date)
-            send_keyboard(token,chat_id,f"🚫 {date} вихідний",[["🏠 Вийти"]])
+    if state:
+        if state["step"] == "date":
+            state["date"] = text
+            state["step"] = "time"
+            show_admin_times(token, chat_id, text)
             return True
 
-        if "закрити" in t:
-            time, date = text.split()[1:3]
-            close_time(token, date, time)
+        if state["step"] == "time":
+
+            if text == "⬅️ Назад":
+                show_admin_dates(token, chat_id)
+                state["step"] = "date"
+                return True
+
+            time = text.split()[0]
+            date = state["date"]
+
+            if is_open(token, date, time):
+                close_time(token, date, time)
+            else:
+                open_time(token, date, time)
+
+            show_admin_times(token, chat_id, date)
             return True
 
-        if "відкрити" in t:
-            time, date = text.split()[1:3]
-            open_time(token, date, time)
-            return True
-    except:
-        pass
-
-    # --- послуги ---
+    # --- додавання послуг ---
     parts = text.split()
     if len(parts) >= 2 and parts[-1].isdigit():
         name = " ".join(parts[:-1])
         price = parts[-1]
         cursor.execute("INSERT INTO services VALUES (?, ?, ?)", (token, name, price))
         conn.commit()
+
         send_keyboard(token,chat_id,f"✅ {name} — {price}",[["🏠 Вийти"]])
         return True
 
@@ -196,23 +214,11 @@ def get_services(token):
     cursor.execute("SELECT name, price FROM services WHERE bot_token=?", (token,))
     return cursor.fetchall()
 
-def get_categories(token):
-    categories = {}
-    for name, price in get_services(token):
-        key = name.split()[0]
-        categories.setdefault(key, []).append((name, price))
-    return categories
-
-def show_categories(token, chat_id):
-    categories = get_categories(token)
-    if not categories:
-        send_keyboard(token,chat_id,"❌ Немає послуг",[["🏠 Меню"]])
-        return
-    send_keyboard(token,chat_id,"💅 Обери категорію:", [[c] for c in categories] + [["🏠 Меню"]])
-
-def show_services(token, chat_id, category):
-    services = get_categories(token).get(category, [])
-    send_keyboard(token,chat_id,category, [[s[0]] for s in services] + [["🔙 Назад"],["🏠 Меню"]])
+def show_services(token, chat_id):
+    services = get_services(token)
+    buttons = [[s[0]] for s in services]
+    buttons.append(["🏠 Меню"])
+    send_keyboard(token,chat_id,"💅 Обери послугу:",buttons)
 
 # --- BOOKINGS ---
 user_states = {}
@@ -229,22 +235,27 @@ def save_booking(token,user_id,service,date,time):
 def show_dates(token, chat_id):
     today = datetime.now()
     buttons = []
+
     for i in range(5):
         d = today + timedelta(days=i)
-        if d.weekday() in WORK_DAYS:
-            buttons.append([d.strftime("%d.%m")])
-    buttons.append(["🏠 Меню"])
+
+        if d.weekday() not in WORK_DAYS:
+            continue
+
+        buttons.append([d.strftime("%d.%m")])
+
     send_keyboard(token,chat_id,"📅 Обери дату:",buttons)
 
 # --- TIME ---
 def show_times(token, chat_id, date):
 
-    date_clean = date.split()[-1]
+    date_clean = date
 
-    try:
-        weekday = datetime.strptime(date_clean,"%d.%m").weekday()
-    except:
-        weekday = datetime.now().weekday()
+    weekday = datetime.strptime(date_clean,"%d.%m").weekday()
+
+    if weekday not in WORK_DAYS:
+        send_keyboard(token,chat_id,"❌ Вихідний",[["🏠 Меню"]])
+        return
 
     slots = DAY_SLOTS.get(weekday, [])
 
@@ -255,10 +266,10 @@ def show_times(token, chat_id, date):
     ]
 
     if not free:
-        send_keyboard(token,chat_id,"❌ Немає вільного часу",[["🏠 Меню"]])
+        send_keyboard(token,chat_id,"❌ Немає місць",[["🏠 Меню"]])
         return
 
-    send_keyboard(token,chat_id,"🕒 Обери час:", [[t] for t in free] + [["🏠 Меню"]])
+    send_keyboard(token,chat_id,"🕒 Обери час:", [[t] for t in free])
 
 # --- FLOW ---
 def handle_booking(token,chat_id,text):
@@ -267,47 +278,26 @@ def handle_booking(token,chat_id,text):
     state=user_states.get(key)
 
     if text == "📅 Записатися":
-        user_states[key]={"step":"category"}
-        show_categories(token,chat_id)
-        return True
-
-    if text == "🏠 Меню":
-        user_states.pop(key,None)
-        show_menu(token,chat_id)
-        return True
-
-    if text == "🔙 Назад":
-        user_states[key]={"step":"category"}
-        show_categories(token,chat_id)
+        user_states[key]={"step":"service"}
+        show_services(token,chat_id)
         return True
 
     if not state:
         return False
 
-    if state["step"]=="category":
-        state["category"]=text
-        state["step"]="service"
-        show_services(token,chat_id,text)
-        return True
-
-    elif state["step"]=="service":
+    if state["step"]=="service":
         state["service"]=text
         state["step"]="date"
         show_dates(token,chat_id)
         return True
 
     elif state["step"]=="date":
-        state["date"]=text.split()[-1]
+        state["date"]=text
         state["step"]="time"
-        show_times(token,chat_id,state["date"])
+        show_times(token,chat_id,text)
         return True
 
     elif state["step"]=="time":
-
-        if is_taken(token,state["date"],text):
-            send_keyboard(token,chat_id,"❌ Зайнято",[["🏠 Меню"]])
-            return True
-
         save_booking(token,chat_id,state["service"],state["date"],text)
 
         send_keyboard(token,chat_id,
