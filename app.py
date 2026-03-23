@@ -51,6 +51,52 @@ DAY_SLOTS = {
     5: ["10:00","12:00","14:00"],
 }
 
+# --- TELEGRAM ---
+def send_keyboard(token, chat_id, text, buttons):
+    requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": text,
+            "reply_markup": {
+                "keyboard": buttons,
+                "resize_keyboard": True
+            }
+        }
+    )
+
+# --- MENU ---
+def show_menu(token, chat_id):
+    send_keyboard(token, chat_id,
+    "💖 Вітаю в салоні!",
+    [
+        ["📅 Записатися"],
+        ["💅 Ціни"],
+        ["📖 Мій запис"],
+        ["❌ Скасувати запис"]
+    ])
+
+# --- SCHEDULE ---
+def set_day_off(token, date):
+    cursor.execute("DELETE FROM schedule WHERE bot_token=? AND date=?", (token, date))
+    for t in ["10:00","12:00","14:00","16:00"]:
+        cursor.execute("INSERT INTO schedule VALUES (?, ?, ?, 0)", (token, date, t))
+    conn.commit()
+
+def close_time(token, date, time):
+    cursor.execute("DELETE FROM schedule WHERE bot_token=? AND date=? AND time=?", (token,date,time))
+    cursor.execute("INSERT INTO schedule VALUES (?, ?, ?, 0)", (token, date, time))
+    conn.commit()
+
+def open_time(token, date, time):
+    cursor.execute("DELETE FROM schedule WHERE bot_token=? AND date=? AND time=?", (token,date,time))
+    conn.commit()
+
+def is_open(token, date, time):
+    cursor.execute("SELECT is_open FROM schedule WHERE bot_token=? AND date=? AND time=?", (token,date,time))
+    r = cursor.fetchone()
+    return True if not r else r[0] == 1
+
 # --- ADMIN ---
 admins = {}
 admin_mode = {}
@@ -61,7 +107,6 @@ def is_admin(token, user_id):
 def set_admin(token, user_id):
     admins[token] = user_id
 
-# --- ADMIN ---
 def handle_admin(token,chat_id,text):
 
     if text == "/admin":
@@ -69,7 +114,7 @@ def handle_admin(token,chat_id,text):
         admin_mode[chat_id] = True
 
         send_keyboard(token,chat_id,
-        "🔐 Адмін режим\n\nОбери дію або просто пиши текст 👇",
+        "🔐 Адмін режим\n\nОбери дію 👇",
         [
             ["➕ Додати послугу"],
             ["🗑 Очистити послуги"],
@@ -90,43 +135,32 @@ def handle_admin(token,chat_id,text):
     if not admin_mode.get(chat_id):
         return False
 
-    # --- КНОПКИ ---
     if text == "➕ Додати послугу":
-        send_keyboard(token,chat_id,
-        "Напиши послугу:\nНаприклад:\nМанікюр 600",
-        [["🏠 Вийти"]])
+        send_keyboard(token,chat_id,"Напиши:\nМанікюр 600",[["🏠 Вийти"]])
         return True
 
     if text == "🗑 Очистити послуги":
         cursor.execute("DELETE FROM services WHERE bot_token=?", (token,))
         conn.commit()
-        send_keyboard(token,chat_id,"✅ Всі послуги видалено",[["🏠 Вийти"]])
+        send_keyboard(token,chat_id,"✅ Очищено",[["🏠 Вийти"]])
         return True
 
     if text == "📋 Список послуг":
         s = get_services(token)
-
-        if not s:
-            send_keyboard(token,chat_id,"❌ Немає послуг",[["🏠 Вийти"]])
-            return True
-
-        msg = "📋 Послуги:\n\n"
-        for i in s:
-            msg += f"{i[0]} — {i[1]} Kč\n"
-
+        msg = "📋 Послуги:\n\n" + "\n".join([f"{i[0]} — {i[1]} Kč" for i in s]) if s else "❌ Немає послуг"
         send_keyboard(token,chat_id,msg,[["🏠 Вийти"]])
         return True
 
     if text == "📅 Графік":
         send_keyboard(token,chat_id,
-        "Напиши:\nВихідний 25.03\nЗакрити 14:00 26.03\nВідкрити 14:00 26.03",
+        "Напиши:\nВихідний 25.03\nЗакрити 14:00 26.03",
         [["🏠 Вийти"]])
         return True
 
-    t = text.lower()
-
-    # --- ГРАФІК ---
+    # --- логіка ---
     try:
+        t = text.lower()
+
         if "вихідний" in t:
             date = text.split()[-1]
             set_day_off(token, date)
@@ -136,38 +170,23 @@ def handle_admin(token,chat_id,text):
         if "закрити" in t:
             time, date = text.split()[1:3]
             close_time(token, date, time)
-            send_keyboard(token,chat_id,f"🚫 {date} {time} закрито",[["🏠 Вийти"]])
             return True
 
         if "відкрити" in t:
             time, date = text.split()[1:3]
             open_time(token, date, time)
-            send_keyboard(token,chat_id,f"✅ {date} {time} відкрито",[["🏠 Вийти"]])
             return True
     except:
         pass
 
-    # --- ПОСЛУГИ (розумне додавання) ---
-    lines = text.split("\n")
-    added = []
-
-    for line in lines:
-        parts = line.strip().split()
-        if len(parts) < 2:
-            continue
-
-        price = parts[-1]
-        if not price.replace(".", "").isdigit():
-            continue
-
+    # --- послуги ---
+    parts = text.split()
+    if len(parts) >= 2 and parts[-1].isdigit():
         name = " ".join(parts[:-1])
+        price = parts[-1]
         cursor.execute("INSERT INTO services VALUES (?, ?, ?)", (token, name, price))
-        added.append(f"✅ {name} — {price}")
-
-    conn.commit()
-
-    if added:
-        send_keyboard(token,chat_id,"\n".join(added),[["🏠 Вийти"]])
+        conn.commit()
+        send_keyboard(token,chat_id,f"✅ {name} — {price}",[["🏠 Вийти"]])
         return True
 
     return True
@@ -186,18 +205,14 @@ def get_categories(token):
 
 def show_categories(token, chat_id):
     categories = get_categories(token)
-
     if not categories:
         send_keyboard(token,chat_id,"❌ Немає послуг",[["🏠 Меню"]])
         return
-
-    buttons = [[c] for c in categories] + [["🏠 Меню"]]
-    send_keyboard(token,chat_id,"💅 Обери категорію:",buttons)
+    send_keyboard(token,chat_id,"💅 Обери категорію:", [[c] for c in categories] + [["🏠 Меню"]])
 
 def show_services(token, chat_id, category):
     services = get_categories(token).get(category, [])
-    buttons = [[s[0]] for s in services] + [["🔙 Назад"]]
-    send_keyboard(token,chat_id,category,buttons)
+    send_keyboard(token,chat_id,category, [[s[0]] for s in services] + [["🔙 Назад"],["🏠 Меню"]])
 
 # --- BOOKINGS ---
 user_states = {}
@@ -210,30 +225,14 @@ def save_booking(token,user_id,service,date,time):
     cursor.execute("INSERT INTO bookings VALUES (?, ?, ?, ?, ?)", (token,user_id,service,date,time))
     conn.commit()
 
-def delete_booking(token,user_id):
-    cursor.execute("DELETE FROM bookings WHERE bot_token=? AND user_id=?",(token,user_id))
-    conn.commit()
-
-def get_user_booking(token,user_id):
-    cursor.execute("SELECT service,date,time FROM bookings WHERE bot_token=? AND user_id=?",(token,user_id))
-    return cursor.fetchone()
-
 # --- DATE ---
 def show_dates(token, chat_id):
     today = datetime.now()
     buttons = []
-
     for i in range(5):
         d = today + timedelta(days=i)
-        if d.weekday() not in WORK_DAYS:
-            continue
-
-        label = d.strftime("%d.%m")
-        if i == 0: label = "Сьогодні " + label
-        elif i == 1: label = "Завтра " + label
-
-        buttons.append([label])
-
+        if d.weekday() in WORK_DAYS:
+            buttons.append([d.strftime("%d.%m")])
     buttons.append(["🏠 Меню"])
     send_keyboard(token,chat_id,"📅 Обери дату:",buttons)
 
@@ -249,13 +248,17 @@ def show_times(token, chat_id, date):
 
     slots = DAY_SLOTS.get(weekday, [])
 
-    free = [t for t in slots if not is_taken(token, date_clean, t) and is_open(token, date_clean, t)]
+    free = [
+        t for t in slots
+        if not is_taken(token, date_clean, t)
+        and is_open(token, date_clean, t)
+    ]
 
     if not free:
-        send_keyboard(token,chat_id,"❌ Немає місць",[["🏠 Меню"]])
+        send_keyboard(token,chat_id,"❌ Немає вільного часу",[["🏠 Меню"]])
         return
 
-    send_keyboard(token,chat_id,"🕒 Вільний час:", [[t] for t in free] + [["🏠 Меню"]])
+    send_keyboard(token,chat_id,"🕒 Обери час:", [[t] for t in free] + [["🏠 Меню"]])
 
 # --- FLOW ---
 def handle_booking(token,chat_id,text):
@@ -263,12 +266,17 @@ def handle_booking(token,chat_id,text):
     key=f"{token}_{chat_id}"
     state=user_states.get(key)
 
+    if text == "📅 Записатися":
+        user_states[key]={"step":"category"}
+        show_categories(token,chat_id)
+        return True
+
     if text == "🏠 Меню":
         user_states.pop(key,None)
         show_menu(token,chat_id)
         return True
 
-    if text == "📅 Записатися":
+    if text == "🔙 Назад":
         user_states[key]={"step":"category"}
         show_categories(token,chat_id)
         return True
@@ -291,12 +299,21 @@ def handle_booking(token,chat_id,text):
     elif state["step"]=="date":
         state["date"]=text.split()[-1]
         state["step"]="time"
-        show_times(token,chat_id,text)
+        show_times(token,chat_id,state["date"])
         return True
 
     elif state["step"]=="time":
+
+        if is_taken(token,state["date"],text):
+            send_keyboard(token,chat_id,"❌ Зайнято",[["🏠 Меню"]])
+            return True
+
         save_booking(token,chat_id,state["service"],state["date"],text)
-        send_keyboard(token,chat_id,f"✅ {state['service']}\n{state['date']} {text}",[["🏠 Меню"]])
+
+        send_keyboard(token,chat_id,
+        f"✅ {state['service']}\n📅 {state['date']} {text}",
+        [["🏠 Меню"]])
+
         user_states.pop(key,None)
         return True
 
@@ -311,27 +328,8 @@ def handle_commands(token,chat_id,text):
 
     if text == "💅 Ціни":
         services=get_services(token)
-
-        msg="💅 Прайс:\n\n"
-        for s in services:
-            msg+=f"{s[0]} — {s[1]} Kč\n"
-
+        msg="\n".join([f"{s[0]} — {s[1]} Kč" for s in services]) or "❌ Пусто"
         send_keyboard(token,chat_id,msg,[["🏠 Меню"]])
-        return True
-
-    if text == "📖 Мій запис":
-        b=get_user_booking(token,chat_id)
-
-        if not b:
-            send_keyboard(token,chat_id,"Немає запису",[["🏠 Меню"]])
-            return True
-
-        send_keyboard(token,chat_id,f"{b[0]}\n{b[1]} {b[2]}",[["🏠 Меню"]])
-        return True
-
-    if text == "❌ Скасувати запис":
-        delete_booking(token,chat_id)
-        send_keyboard(token,chat_id,"❌ Скасовано",[["🏠 Меню"]])
         return True
 
     return False
@@ -367,6 +365,6 @@ def connect_bot(token):
     requests.get(f"https://api.telegram.org/bot{token}/setWebhook?url={url}")
 
 if __name__ == "__main__":
-    TOKEN = "8741891429:AAF2IQ_6Mtx741sS2Jevu7eQgQaQGK7yCms"
+    TOKEN = "ТВІЙ_ТОКЕН"
     connect_bot(TOKEN)
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
