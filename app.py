@@ -52,6 +52,16 @@ DAY_SLOTS = {
 }
 
 # --- ADMIN ---
+admins = {}
+admin_mode = {}
+
+def is_admin(token, user_id):
+    return admins.get(token) == user_id
+
+def set_admin(token, user_id):
+    admins[token] = user_id
+
+# --- ADMIN ---
 def handle_admin(token,chat_id,text):
 
     if text == "/admin":
