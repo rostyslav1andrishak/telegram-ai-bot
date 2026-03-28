@@ -285,6 +285,8 @@ def ask_ai(user_id, message):
 
 Навіть якщо мало даних — поводься як той, хто памʼятає.
 
+Якщо є щось з минулого що важливо — нагадай користувачу.
+
 ПАМʼЯТЬ:
 {memory}
 
@@ -311,7 +313,38 @@ def ask_ai(user_id, message):
         return response.json()["choices"][0]["message"]["content"]
 
     except:
-        return "Помилка AI"
+    return "Помилка AI"
+
+def smart_followup(user_id):
+    memory = get_memory(user_id)
+
+    response = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "На основі памʼяті дай коротку корисну пораду"
+                },
+                {
+                    "role": "user",
+                    "content": memory
+                }
+            ]
+        }
+    )
+
+    data = response.json()
+
+    if "choices" in data:
+        tip = data["choices"][0]["message"]["content"]
+        send_message(user_id, f"💡 Порада:\n{tip}")
+
 
 # --- WEBHOOK ---
 @app.route("/webhook", methods=["POST"])
@@ -339,10 +372,12 @@ def webhook():
 
     reply = ask_ai(chat_id, text)
 
-    save_message(chat_id, "assistant", reply)
-    send_message(chat_id, reply)
+save_message(chat_id, "assistant", reply)
+send_message(chat_id, reply)
 
-    return "ok"
+smart_followup(chat_id)  
+
+return "ok"
 
 # --- LOOP ---
 def reminder_loop():
