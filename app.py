@@ -297,7 +297,7 @@ def ask_ai(user_id, message):
 """
 }]
 
-  messages += history
+messages += history
 messages.append({"role": "user", "content": message})
 
 try:
