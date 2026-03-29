@@ -154,10 +154,11 @@ def detect_mood(user_id, text):
     }
 )
         data = response.json()
-        if "choices" in data:
-            mood = data["choices"][0]["message"]["content"]
+
+if "choices" in data:
+    mood = data["choices"][0]["message"]["content"]
 else:
-    mood = "невідомо"
+    mood = "unknown"
 
         cursor.execute(
             "INSERT INTO mood (user_id, mood) VALUES (?, ?)",
