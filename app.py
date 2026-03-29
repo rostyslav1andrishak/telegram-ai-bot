@@ -269,8 +269,8 @@ def ask_ai(user_id, message):
     memory = get_memory(user_id)
 
     messages = [{
-    "role": "system",
-    "content": f"""
+        "role": "system",
+        "content": f"""
 Ти персональний AI-асистент з памʼяттю.
 
 ТИ:
@@ -295,33 +295,36 @@ def ask_ai(user_id, message):
 
 Будь розумним, живим і корисним.
 """
-}]
+    }]
 
-messages += history
-messages.append({"role": "user", "content": message})
+    messages += history
+    messages.append({
+        "role": "user",
+        "content": message
+    })
 
-try:
-    response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "gpt-4o-mini",
-            "messages": messages
-        }
-    )
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": messages
+            }
+        )
 
-    return response.json()["choices"][0]["message"]["content"]
+        return response.json()["choices"][0]["message"]["content"]
 
-except Exception as e:
-    print("AI ERROR:", e)
-    return "Помилка AI"
+    except Exception as e:
+        print("AI ERROR:", e)
+        return "Помилка AI"
 
 
-# --- SMART FOLLOWUP ---
 def smart_followup(user_id):
+
     memory = get_memory(user_id)
 
     try:
