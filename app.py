@@ -134,39 +134,27 @@ def get_memory(user_id):
 def detect_mood(user_id, text):
     try:
         response = requests.post(
-    "https://api.openai.com/v1/chat/completions",
-    headers={
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    },
-    json={
-        "model": "gpt-4o-mini",
-        "messages": [
-            {
-                "role": "system",
-                "content": "Визнач емоцію одним словом"
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
             },
-            {
-                "role": "user",
-                "content": text
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": "Визнач емоцію одним словом"},
+                    {"role": "user", "content": text}
+                ]
             }
-        ]
-    }
-)
+        )
+
         data = response.json()
 
-if "choices" in data:
-    mood = data["choices"][0]["message"]["content"]
-else:
-    mood = "unknown"
+        if "choices" in data:
+            mood = data["choices"][0]["message"]["content"]
 
-        cursor.execute(
-            "INSERT INTO mood (user_id, mood) VALUES (?, ?)",
-            (user_id, mood)
-        )
-        conn.commit()
-    except:
-        pass
+    except Exception as e:
+        print("MOOD ERROR:", e)
 
 # --- SMART MEMORY ---
 def analyze_and_save(user_id, text):
