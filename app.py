@@ -375,7 +375,6 @@ def webhook():
 
         if handle_commands(chat_id, text):
             return "ok"
-
     else:
         text = "Не підтримую"
 
@@ -385,12 +384,13 @@ def webhook():
 
     reply = ask_ai(chat_id, text)
 
-save_message(chat_id, "assistant", reply)
-send_message(chat_id, reply)
+    # ✅ ВСЕ НИЖЧЕ МАЄ БУТИ З ВІДСТУПОМ!
+    save_message(chat_id, "assistant", reply)
+    send_message(chat_id, reply)
 
-smart_followup(chat_id)  
+    smart_followup(chat_id)
 
-return "ok"
+    return "ok"
 
 # --- LOOP ---
 def reminder_loop():
