@@ -134,24 +134,25 @@ def get_memory(user_id):
 def detect_mood(user_id, text):
     try:
         response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
+    "https://api.openai.com/v1/chat/completions",
+    headers={
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    },
+    json={
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "system",
+                "content": "Визнач емоцію одним словом"
             },
-         json={
-    "model": "gpt-4o-mini",
-    "messages": [
-        {
-            "role": "system",
-            "content": "Визнач емоцію повідомлення одним словом (наприклад: радість, сум, злість)"
-        },
-        {
-            "role": "user",
-            "content": text
-        }
-    ]
-}
+            {
+                "role": "user",
+                "content": text
+            }
+        ]
+    }
+)
         data = response.json()
         if "choices" in data:
     mood = data["choices"][0]["message"]["content"]
