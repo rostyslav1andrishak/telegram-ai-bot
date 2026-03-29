@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import threading
 import time
 
-TOKEN = " 8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
+TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
