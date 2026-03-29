@@ -155,7 +155,7 @@ def detect_mood(user_id, text):
 )
         data = response.json()
         if "choices" in data:
-    mood = data["choices"][0]["message"]["content"]
+            mood = data["choices"][0]["message"]["content"]
 else:
     mood = "невідомо"
 
