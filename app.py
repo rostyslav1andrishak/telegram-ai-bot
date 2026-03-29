@@ -297,27 +297,10 @@ def ask_ai(user_id, message):
 """
 }]
 
-    messages += history
-    messages.append({"role": "user", "content": message})
+  messages += history
+messages.append({"role": "user", "content": message})
 
-    try:
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={"model": "gpt-4o-mini", "messages": messages}
-        )
-
-        return response.json()["choices"][0]["message"]["content"]
-
-   except:
-           return "Помилка AI"
-
-def smart_followup(user_id):
-    memory = get_memory(user_id)
-
+try:
     response = requests.post(
         "https://api.openai.com/v1/chat/completions",
         headers={
@@ -326,24 +309,51 @@ def smart_followup(user_id):
         },
         json={
             "model": "gpt-4o-mini",
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "На основі памʼяті дай коротку корисну пораду"
-                },
-                {
-                    "role": "user",
-                    "content": memory
-                }
-            ]
+            "messages": messages
         }
     )
 
-    data = response.json()
+    return response.json()["choices"][0]["message"]["content"]
 
-    if "choices" in data:
-        tip = data["choices"][0]["message"]["content"]
-        send_message(user_id, f"💡 Порада:\n{tip}")
+except Exception as e:
+    print("AI ERROR:", e)
+    return "Помилка AI"
+
+
+# --- SMART FOLLOWUP ---
+def smart_followup(user_id):
+    memory = get_memory(user_id)
+
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "На основі памʼяті дай коротку корисну пораду"
+                    },
+                    {
+                        "role": "user",
+                        "content": memory
+                    }
+                ]
+            }
+        )
+
+        data = response.json()
+
+        if "choices" in data:
+            tip = data["choices"][0]["message"]["content"]
+            send_message(user_id, f"💡 Порада:\n{tip}")
+
+    except Exception as e:
+        print("FOLLOWUP ERROR:", e)
 
 
 # --- WEBHOOK ---
