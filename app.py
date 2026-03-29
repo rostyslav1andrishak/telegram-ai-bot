@@ -290,9 +290,6 @@ def ask_ai(user_id, message):
 ПАМʼЯТЬ:
 {memory}
 
-ІСТОРІЯ:
-{history}
-
 Будь розумним, живим і корисним.
 """
     }]
@@ -388,7 +385,7 @@ def webhook():
     save_message(chat_id, "assistant", reply)
     send_message(chat_id, reply)
 
-    smart_followup(chat_id)
+    # smart_followup(chat_id)
 
     return "ok"
 
