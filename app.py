@@ -112,8 +112,17 @@ def get_history(user_id, limit=10):
         SELECT role, text FROM messages
         WHERE user_id=? ORDER BY timestamp DESC LIMIT ?
     """, (user_id, limit))
+
     rows = cursor.fetchall()
-    return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+
+    history = []
+    for role, text in reversed(rows):
+        history.append({
+            "role": role,
+            "content": text
+        })
+
+    return history
 
 # --- MEMORY ---
 def get_memory(user_id):
@@ -130,17 +139,24 @@ def detect_mood(user_id, text):
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "Content-Type": "application/json"
             },
-            json={
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": "happy, sad, stressed, neutral"},
-                    {"role": "user", "content": text}
-                ]
-            }
-        )
-
+         json={
+    "model": "gpt-4o-mini",
+    "messages": [
+        {
+            "role": "system",
+            "content": "Визнач емоцію повідомлення одним словом (наприклад: радість, сум, злість)"
+        },
+        {
+            "role": "user",
+            "content": text
+        }
+    ]
+}
         data = response.json()
-        mood = data["choices"][0]["message"]["content"]
+        if "choices" in data:
+    mood = data["choices"][0]["message"]["content"]
+else:
+    mood = "невідомо"
 
         cursor.execute(
             "INSERT INTO mood (user_id, mood) VALUES (?, ?)",
