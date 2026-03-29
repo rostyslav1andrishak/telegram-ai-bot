@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import threading
 import time
 
-TOKEN = "8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
+TOKEN = " 8658895357:AAGCcvoiqwQGPCgpuXWAmSeQiM3IDHq4sRc"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = Flask(__name__)
@@ -312,8 +312,8 @@ def ask_ai(user_id, message):
 
         return response.json()["choices"][0]["message"]["content"]
 
-    except:
-    return "Помилка AI"
+   except:
+           return "Помилка AI"
 
 def smart_followup(user_id):
     memory = get_memory(user_id)
@@ -394,4 +394,4 @@ def set_webhook():
 
 set_webhook()
 
-app.run(host="0.0.0.0", port=10000)
+app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
